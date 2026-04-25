@@ -21,6 +21,8 @@ import {
   Target,
 } from "lucide-react";
 
+import { RoutineAnalysisCard } from "./analysis-card";
+
 function startOfWeekUtcIso(date: Date) {
   const day = (date.getUTCDay() + 6) % 7; // Monday=0 ... Sunday=6
   const start = new Date(
@@ -29,6 +31,32 @@ function startOfWeekUtcIso(date: Date) {
   start.setUTCDate(start.getUTCDate() - day);
   start.setUTCHours(0, 0, 0, 0);
   return start.toISOString();
+}
+
+function AnalysisSkeleton() {
+  return (
+    <div className="animate-pulse rounded-xl border bg-card p-6 shadow space-y-5">
+      <div className="space-y-2">
+        <div className="h-5 w-40 rounded bg-muted" />
+        <div className="h-4 w-full max-w-2xl rounded bg-muted" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="h-20 rounded-lg bg-muted" />
+        <div className="h-20 rounded-lg bg-muted" />
+        <div className="h-20 rounded-lg bg-muted" />
+      </div>
+
+      <div className="space-y-3">
+        <div className="h-4 w-56 rounded bg-muted" />
+        <div className="space-y-2">
+          <div className="h-10 rounded bg-muted" />
+          <div className="h-10 rounded bg-muted" />
+          <div className="h-10 rounded bg-muted" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function DashboardSkeleton() {
@@ -271,6 +299,12 @@ async function DashboardContent() {
             </Button>
           </CardFooter>
         </Card>
+      </section>
+
+      <section>
+        <Suspense fallback={<AnalysisSkeleton />}>
+          <RoutineAnalysisCard />
+        </Suspense>
       </section>
 
       <section className="space-y-3">
