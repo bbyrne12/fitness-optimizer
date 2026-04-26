@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 
+import { AppNav } from "@/components/app-nav";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -90,27 +91,29 @@ export default function OnboardingPage() {
   };
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-4">
-      <Card className="w-full max-w-[500px]">
-        <CardHeader className="space-y-3">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-2xl">Welcome</CardTitle>
-              <span className="text-sm text-muted-foreground">
-                Step {step} of 3
-              </span>
+    <>
+      <AppNav />
+      <main className="min-h-screen flex items-center justify-center p-4">
+        <Card className="w-full max-w-[500px]">
+          <CardHeader className="space-y-3">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-2xl">Welcome</CardTitle>
+                <span className="text-sm text-muted-foreground">
+                  Step {step} of 3
+                </span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-muted">
+                <div
+                  className="h-2 rounded-full bg-primary transition-all"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
             </div>
-            <div className="h-2 w-full rounded-full bg-muted">
-              <div
-                className="h-2 rounded-full bg-primary transition-all"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
-          <CardDescription>
-            Answer a few quick questions so we can personalize your workout plan.
-          </CardDescription>
-        </CardHeader>
+            <CardDescription>
+              Answer a few quick questions so we can personalize your workout plan.
+            </CardDescription>
+          </CardHeader>
 
         <form onSubmit={onSubmit}>
           <CardContent className="space-y-6">
@@ -236,8 +239,9 @@ export default function OnboardingPage() {
             </div>
           </CardFooter>
         </form>
-      </Card>
-    </main>
+        </Card>
+      </main>
+    </>
   );
 }
 

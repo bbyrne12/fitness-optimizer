@@ -32,6 +32,10 @@ type RoutineItem = {
   day_of_week: number; // 1=Mon ... 7=Sun
 };
 
+type RoutineFormProps = {
+  initialRoutine?: RoutineItem[];
+};
+
 const DAYS: Array<{ value: number; label: string }> = [
   { value: 1, label: "Monday" },
   { value: 2, label: "Tuesday" },
@@ -47,10 +51,10 @@ function formatPrescription(item: RoutineItem) {
   return `${item.sets} x ${item.reps} @ ${weight} lbs`;
 }
 
-export function RoutineForm() {
+export function RoutineForm({ initialRoutine }: RoutineFormProps) {
   const router = useRouter();
 
-  const [items, setItems] = useState<RoutineItem[]>([]);
+  const [items, setItems] = useState<RoutineItem[]>(() => initialRoutine ?? []);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 

@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 
+import { AppNav } from "@/components/app-nav";
 import { Card } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 
@@ -65,13 +66,16 @@ async function ExercisePageContent() {
 
 export default function ExercisesPage() {
   return (
-    <main className="min-h-screen w-full px-4 py-10">
-      <div className="mx-auto w-full max-w-6xl space-y-6">
-        <Suspense fallback={<ExercisePageSkeleton />}>
-          <ExercisePageContent />
-        </Suspense>
-      </div>
-    </main>
+    <>
+      <AppNav />
+      <main className="min-h-screen w-full px-4 py-10">
+        <div className="mx-auto w-full max-w-6xl space-y-6">
+          <Suspense fallback={<ExercisePageSkeleton />}>
+            <ExercisePageContent />
+          </Suspense>
+        </div>
+      </main>
+    </>
   );
 }
 

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
+import { AppNav } from "@/components/app-nav";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,10 +14,10 @@ import {
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import {
-  BarChart3,
   CalendarDays,
   Dumbbell,
   Search,
+  Sparkles,
   Star,
   Target,
 } from "lucide-react";
@@ -351,16 +352,16 @@ async function DashboardContent() {
           </Card>
 
           <Card className="transition-colors hover:bg-accent">
-            <Link href="/progress" className="block">
+            <Link href="/plan" className="block">
               <CardHeader className="space-y-1">
                 <div className="flex items-center gap-3">
                   <div className="rounded-md border bg-background p-2">
-                    <BarChart3 className="h-5 w-5 text-primary" />
+                    <Sparkles className="h-5 w-5 text-primary" />
                   </div>
-                  <CardTitle className="text-lg">View Progress</CardTitle>
+                  <CardTitle className="text-lg">View My Plan</CardTitle>
                 </div>
                 <CardDescription>
-                  See trends across workouts and lifts.
+                  Your personalized weekly workout plan
                 </CardDescription>
               </CardHeader>
             </Link>
@@ -389,12 +390,15 @@ async function DashboardContent() {
 
 export default function ProtectedPage() {
   return (
-    <main className="min-h-screen w-full px-4 py-10">
-      <div className="mx-auto w-full max-w-6xl">
-        <Suspense fallback={<DashboardSkeleton />}>
-          <DashboardContent />
-        </Suspense>
-      </div>
-    </main>
+    <>
+      <AppNav />
+      <main className="min-h-screen w-full px-4 py-10">
+        <div className="mx-auto w-full max-w-6xl">
+          <Suspense fallback={<DashboardSkeleton />}>
+            <DashboardContent />
+          </Suspense>
+        </div>
+      </main>
+    </>
   );
 }
