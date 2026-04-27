@@ -23,6 +23,7 @@ type ProfileRow = {
   available_days: number[] | null;
   experience_level: string | null;
   available_equipment: string[] | null;
+  primary_goal: string | null;
 };
 
 type RoutineRow = {
@@ -104,7 +105,7 @@ export async function PlanView() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("available_days, experience_level, available_equipment")
+    .select("available_days, experience_level, available_equipment, primary_goal")
     .eq("id", user.id)
     .single();
 
@@ -196,6 +197,7 @@ export async function PlanView() {
     exerciseLibrary,
     weeklyVolume: analysis.weeklyVolume,
     imbalanceMuscles,
+    primaryGoal: p?.primary_goal ?? undefined,
   });
 
   return (

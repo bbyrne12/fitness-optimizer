@@ -33,6 +33,7 @@ type PlanInput = {
   exerciseLibrary: ExerciseCandidate[];
   weeklyVolume: Record<string, number>;
   imbalanceMuscles: string[];
+  primaryGoal?: string;
 };
 
 type PlannedExercise = {
@@ -93,8 +94,45 @@ const DAY_NAMES: Record<number, string> = {
   7: "Sun",
 };
 
-function getSplitForDays(numDays: number): string[] {
+function getSplitForDays(numDays: number, primaryGoal?: string): string[] {
   if (numDays <= 0) return [];
+
+  const goal = (primaryGoal || "").toLowerCase();
+  const isCardioFocus = goal.includes("cardio");
+  const isWeightLoss = goal.includes("weight") || goal.includes("lose");
+  const isGeneral = goal.includes("general");
+
+  // Cardio goal: every training day includes cardio, mix in strength
+  if (isCardioFocus) {
+    if (numDays === 1) return ["Cardio"];
+    if (numDays === 2) return ["Cardio", "Full Body"];
+    if (numDays === 3) return ["Cardio", "Full Body", "Cardio"];
+    if (numDays === 4) return ["Cardio", "Upper", "Cardio", "Lower"];
+    if (numDays === 5) return ["Cardio", "Push", "Cardio", "Pull", "Legs"];
+    return ["Cardio", "Push", "Cardio", "Pull", "Cardio", "Legs"].slice(0, numDays);
+  }
+
+  // Weight loss: full body strength + cardio combo days for higher calorie burn
+  if (isWeightLoss) {
+    if (numDays === 1) return ["Full Body"];
+    if (numDays === 2) return ["Full Body", "Cardio"];
+    if (numDays === 3) return ["Full Body", "Cardio", "Full Body"];
+    if (numDays === 4) return ["Full Body", "Cardio", "Full Body", "Cardio"];
+    if (numDays === 5) return ["Upper", "Cardio", "Lower", "Cardio", "Full Body"];
+    return ["Upper", "Cardio", "Lower", "Cardio", "Upper", "Lower"].slice(0, numDays);
+  }
+
+  // General fitness: balanced strength + 1-2 cardio sessions
+  if (isGeneral) {
+    if (numDays === 1) return ["Full Body"];
+    if (numDays === 2) return ["Full Body", "Cardio"];
+    if (numDays === 3) return ["Push", "Pull", "Cardio"];
+    if (numDays === 4) return ["Upper", "Lower", "Upper", "Cardio"];
+    if (numDays === 5) return ["Push", "Pull", "Legs", "Cardio", "Upper"];
+    return ["Push", "Pull", "Legs", "Cardio", "Upper", "Lower"].slice(0, numDays);
+  }
+
+  // Default ("Build Strength" or unspecified): pure strength splits
   if (numDays === 1) return ["Full Body"];
   if (numDays === 2) return ["Full Body", "Full Body"];
   if (numDays === 3) return ["Push", "Pull", "Legs"];
@@ -117,6 +155,8 @@ function getMusclesForFocus(focus: string): string[] {
       return LEG_MUSCLES;
     case "Full Body":
       return [...PUSH_MUSCLES, ...PULL_MUSCLES, ...LEG_MUSCLES];
+    case "Cardio":
+      return ["cardio"];
     default:
       return [];
   }
@@ -229,7 +269,7 @@ export function generateWeeklyPlan(input: PlanInput): WeeklyPlan {
 
   const sortedDays = [...availableDays].sort((a, b) => a - b);
   const numDays = sortedDays.length;
-  const split = getSplitForDays(numDays);
+  const split = getSplitForDays(numDays, input.primaryGoal);
 
   const days: PlannedDay[] = [];
   for (let d = 1; d <= 7; d += 1) {
@@ -260,24 +300,28 @@ export function generateWeeklyPlan(input: PlanInput): WeeklyPlan {
     const focus = split[i] || "Full Body";
 
     const usedThisDay = new Set<number>();
+    const cardioCount = focus === "Cardio" ? 2 : exercisesPerDay;
     const exercisesPicked = pickExercisesForFocus(
       focus,
       exerciseLibrary,
-      exercisesPerDay,
+      cardioCount,
       imbalanceMuscles,
       equipmentTags,
       numDays >= 6 ? usedThisDay : usedAcrossWeek,
     );
 
+    const isCardio = focus === "Cardio";
     const planned: PlannedExercise[] = exercisesPicked.map((ex) => {
       usedAcrossWeek.add(ex.id);
       return {
         exercise_id: ex.id,
         name: ex.name,
         primary_muscle: ex.primary_muscle,
-        sets: setsPerExercise,
-        reps,
-        rationale: buildRationale(ex, focus, imbalanceMuscles),
+        sets: isCardio ? 1 : setsPerExercise,
+        reps: isCardio ? 30 : reps,
+        rationale: isCardio
+          ? "Cardio session for endurance and conditioning"
+          : buildRationale(ex, focus, imbalanceMuscles),
       };
     });
 
