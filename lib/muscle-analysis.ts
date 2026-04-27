@@ -38,6 +38,33 @@ export type RoutineExercise = {
 
 export type Severity = "low" | "medium" | "high";
 
+/**
+ * Maps specific muscle names to broader "buckets" used for volume tracking.
+ * For example, "lats" / "middle back" / "lower back" / "traps" all roll up
+ * into "back" so the analyzer can detect "back not trained" correctly.
+ */
+export function getMuscleGroupBucket(muscle: string): string {
+  const m = (muscle || "").toLowerCase().trim();
+
+  if (m === "lats") return "back";
+  if (m === "middle back") return "back";
+  if (m === "lower back") return "back";
+  if (m === "traps") return "back";
+
+  if (m === "front delts") return "shoulders";
+  if (m === "side delts") return "shoulders";
+  if (m === "rear delts") return "shoulders";
+
+  if (m === "abductors") return "glutes";
+  if (m === "adductors") return "glutes";
+
+  if (m === "obliques") return "abdominals";
+
+  if (m === "forearms") return "biceps";
+
+  return m;
+}
+
 export type Imbalance = {
   severity: Severity;
   title: string;
@@ -306,7 +333,8 @@ function safeNumber(n: unknown): number {
 function addVolume(record: Record<string, number>, muscle: string, sets: number) {
   const m = normalizeMuscleName(muscle);
   if (!m) return;
-  record[m] = (record[m] ?? 0) + safeNumber(sets);
+  const bucket = getMuscleGroupBucket(m);
+  record[bucket] = (record[bucket] ?? 0) + safeNumber(sets);
 }
 
 function sumVolumeFor(record: Record<string, number>, muscles: Set<string>) {

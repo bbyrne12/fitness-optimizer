@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 
+import { AppNav } from "@/components/app-nav";
 import { Card } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 
@@ -54,20 +55,23 @@ async function LogContent() {
 
 export default function LogWorkoutPage() {
   return (
-    <main className="min-h-screen w-full px-4 py-10">
-      <div className="mx-auto w-full max-w-4xl space-y-6">
-        <header className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight">Log a Workout</h1>
-          <p className="text-sm text-muted-foreground">
-            Track an exercise you completed today.
-          </p>
-        </header>
+    <>
+      <AppNav />
+      <main className="min-h-screen w-full px-4 py-10">
+        <div className="mx-auto w-full max-w-4xl space-y-6">
+          <header className="space-y-2">
+            <h1 className="text-3xl font-semibold tracking-tight">Log a Workout</h1>
+            <p className="text-sm text-muted-foreground">
+              Track an exercise you completed today.
+            </p>
+          </header>
 
-        <Suspense fallback={<LogSkeleton />}>
-          <LogContent />
-        </Suspense>
-      </div>
-    </main>
+          <Suspense fallback={<LogSkeleton />}>
+            <LogContent />
+          </Suspense>
+        </div>
+      </main>
+    </>
   );
 }
 
