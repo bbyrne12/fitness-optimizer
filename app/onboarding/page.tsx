@@ -59,7 +59,14 @@ export default function OnboardingPage() {
 
   const toggleEquipment = (item: string, checked: boolean) => {
     setAvailableEquipment((prev) => {
-      if (checked) return prev.includes(item) ? prev : [...prev, item];
+      if (checked) {
+        // Bodyweight only is exclusive — clear all other selections
+        if (item === "Bodyweight only") return ["Bodyweight only"];
+        // Selecting anything else removes "Bodyweight only" if present
+        const withoutBodyweight = prev.filter((x) => x !== "Bodyweight only");
+        if (withoutBodyweight.includes(item)) return withoutBodyweight;
+        return [...withoutBodyweight, item];
+      }
       return prev.filter((x) => x !== item);
     });
   };
