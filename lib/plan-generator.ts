@@ -189,12 +189,12 @@ function getVolumeForExperience(experience: string): {
 } {
   const lower = experience.toLowerCase();
   if (lower.includes("beginner")) {
-    return { exercisesPerDay: 4, setsPerExercise: 3, reps: 10 };
+    return { exercisesPerDay: 3, setsPerExercise: 3, reps: 10 };
   }
   if (lower.includes("advanced")) {
-    return { exercisesPerDay: 6, setsPerExercise: 4, reps: 8 };
+    return { exercisesPerDay: 5, setsPerExercise: 3, reps: 8 };
   }
-  return { exercisesPerDay: 5, setsPerExercise: 3, reps: 10 };
+  return { exercisesPerDay: 4, setsPerExercise: 3, reps: 10 };
 }
 
 function buildRationale(
