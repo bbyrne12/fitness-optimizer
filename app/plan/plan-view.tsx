@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -137,23 +138,7 @@ export async function PlanView() {
     : { data: [] as unknown[] };
 
   const rows = (routineJoin ?? []) as unknown as RoutineRow[];
-  if (rows.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Your plan is ready once we know your routine</CardTitle>
-          <CardDescription>
-            Set up your current routine first so we can generate a personalized plan.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button asChild variant="outline">
-            <Link href="/plans">Create a plan</Link>
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
+  const isStarterPlan = !activePlan || rows.length === 0;
 
   const routine: RoutineExercise[] = rows
     .map((r) => {
@@ -172,7 +157,7 @@ export async function PlanView() {
     .filter((x) => x.exercise_id > 0 && x.sets > 0);
 
   const analysis = analyzeRoutine(routine);
-  const imbalanceMuscles = extractImbalanceMuscles(analysis);
+  const imbalanceMuscles = isStarterPlan ? [] : extractImbalanceMuscles(analysis);
 
   const allowed = equipmentAllowedSet(availableEquipment);
 
@@ -204,7 +189,7 @@ export async function PlanView() {
     experience,
     availableEquipment,
     exerciseLibrary,
-    weeklyVolume: analysis.weeklyVolume,
+    weeklyVolume: isStarterPlan ? {} : analysis.weeklyVolume,
     imbalanceMuscles,
     primaryGoal: p?.primary_goal ?? undefined,
   });
@@ -216,6 +201,16 @@ export async function PlanView() {
           <div className="rounded-lg border-l-2 border-l-lime-400 border border-zinc-800 bg-zinc-900 p-3 text-sm text-zinc-300">
             We didn&apos;t find schedule days on your profile, so we defaulted to{" "}
             <span className="font-medium">Mon–Fri</span>. You can update this in onboarding.
+          </div>
+        )}
+
+        {isStarterPlan && (
+          <div className="flex items-start gap-3 rounded-lg border border-lime-400/30 bg-lime-400/10 p-3 text-sm text-zinc-300">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-lime-400" />
+            <p>
+              This is a starter plan based on your profile. Save it and log workouts to get
+              personalized recommendations.
+            </p>
           </div>
         )}
 
