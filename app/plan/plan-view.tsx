@@ -204,7 +204,7 @@ export async function PlanView() {
     <div className="space-y-4">
       <div className="space-y-3">
         {usedDefaultDays && (
-          <div className="rounded-lg border bg-accent p-3 text-sm text-foreground">
+          <div className="rounded-lg border-l-2 border-l-lime-400 border border-zinc-800 bg-zinc-900 p-3 text-sm text-zinc-300">
             We didn&apos;t find schedule days on your profile, so we defaulted to{" "}
             <span className="font-medium">Mon–Fri</span>. You can update this in onboarding.
           </div>
@@ -215,7 +215,7 @@ export async function PlanView() {
             {plan.notes.map((n, idx) => (
               <div
                 key={`${idx}-${n}`}
-                className="rounded-lg border bg-accent p-3 text-sm text-foreground"
+                className="rounded-lg border-l-2 border-l-lime-400 border border-zinc-800 bg-zinc-900 p-3 text-sm text-zinc-300"
               >
                 {n}
               </div>
