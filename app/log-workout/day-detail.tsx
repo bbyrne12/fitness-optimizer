@@ -242,7 +242,7 @@ function NumberInput({ label, value, onValue, disabled }: { label: string; value
   return (
     <div className="space-y-2">
       <Label className="text-xs uppercase tracking-wider text-zinc-400">{label}</Label>
-      <Input type="number" min={0} step={label === "Weight" ? 2.5 : 1} value={Number.isFinite(value) ? value : 0} disabled={disabled} onChange={(e) => { const n = Number(e.target.value); onValue(Number.isFinite(n) && n >= 0 ? n : 0); }} className="border-zinc-700 bg-zinc-950 text-white" />
+      <Input type="number" min={0} step={label === "Weight" ? 2.5 : 1} value={Number.isFinite(value) ? value : 0} disabled={disabled} onChange={(e) => { const n = Number(e.target.value); onValue(Number.isFinite(n) && n >= 0 ? n : 0); }} onFocus={(e) => e.target.select()} className="border-zinc-700 bg-zinc-950 text-white" />
     </div>
   );
 }
