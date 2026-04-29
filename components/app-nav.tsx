@@ -57,14 +57,14 @@ export function AppNav() {
   };
 
   return (
-    <div className="sticky top-0 z-10 w-full border-b bg-background/95 backdrop-blur">
+    <div className="sticky top-0 z-10 w-full border-b border-zinc-800 bg-zinc-950/95 backdrop-blur">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-3 px-4">
         <div className="flex items-center gap-3">
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="text-zinc-400 hover:bg-zinc-900 hover:text-white md:hidden"
             onClick={() => setMenuOpen((v) => !v)}
             aria-label="Open menu"
           >
@@ -73,7 +73,7 @@ export function AppNav() {
 
           <Link
             href="/protected"
-            className="font-semibold tracking-tight hover:opacity-90"
+            className="font-bold tracking-tight text-white hover:opacity-90"
           >
             Fitness Optimizer
           </Link>
@@ -89,8 +89,8 @@ export function AppNav() {
                 className={cn(
                   "rounded-md px-3 py-2 text-sm font-medium transition-colors",
                   active
-                    ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                    ? "font-semibold text-lime-400"
+                    : "text-zinc-400 hover:text-white",
                 )}
               >
                 {l.label}
@@ -100,17 +100,23 @@ export function AppNav() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <span className="hidden text-sm text-muted-foreground sm:inline">
+          <span className="hidden text-sm text-zinc-500 sm:inline">
             {email ?? ""}
           </span>
-          <Button type="button" variant="outline" onClick={logout} disabled={isPending}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={logout}
+            disabled={isPending}
+            className="text-zinc-400 hover:bg-zinc-900 hover:text-white"
+          >
             Logout
           </Button>
         </div>
       </div>
 
       {menuOpen && (
-        <div className="border-t bg-background md:hidden">
+        <div className="border-t border-zinc-800 bg-zinc-950 md:hidden">
           <div className="mx-auto w-full max-w-6xl px-4 py-3">
             <div className="flex flex-col gap-1">
               {NAV_LINKS.map((l) => {
@@ -123,8 +129,8 @@ export function AppNav() {
                     className={cn(
                       "rounded-md px-3 py-2 text-sm font-medium transition-colors",
                       active
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                        ? "font-semibold text-lime-400"
+                        : "text-zinc-400 hover:bg-zinc-900 hover:text-white",
                     )}
                   >
                     {l.label}
