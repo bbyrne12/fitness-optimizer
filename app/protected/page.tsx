@@ -305,7 +305,7 @@ async function DashboardContent() {
           </CardContent>
           <CardFooter className="justify-end">
             <Button asChild variant="outline">
-              <Link href="/routine">Manage routine</Link>
+              <Link href="/plans">Manage plans</Link>
             </Button>
           </CardFooter>
         </Card>
@@ -347,7 +347,7 @@ async function DashboardContent() {
           </Card>
 
           <Card className="transition-colors hover:bg-accent">
-            <Link href="/routine" className="block">
+            <Link href="/plans" className="block">
               <CardHeader className="space-y-1">
                 <div className="flex items-center gap-3">
                   <div className="rounded-md border bg-background p-2">

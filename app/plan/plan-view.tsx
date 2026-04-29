@@ -148,7 +148,7 @@ export async function PlanView() {
         </CardHeader>
         <CardContent>
           <Button asChild variant="outline">
-            <Link href="/routine">Set up my routine</Link>
+            <Link href="/plans">Create a plan</Link>
           </Button>
         </CardContent>
       </Card>

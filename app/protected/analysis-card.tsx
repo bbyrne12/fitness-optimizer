@@ -146,7 +146,7 @@ export async function RoutineAnalysisCard() {
         </CardHeader>
         <CardContent>
           <Button asChild variant="outline">
-            <Link href="/routine">Set up your routine</Link>
+            <Link href="/plans">Manage plans</Link>
           </Button>
         </CardContent>
       </Card>
@@ -180,7 +180,7 @@ export async function RoutineAnalysisCard() {
         </CardHeader>
         <CardContent>
           <Button asChild variant="outline">
-            <Link href="/routine">Set up your routine</Link>
+            <Link href="/plans">Manage plans</Link>
           </Button>
         </CardContent>
       </Card>
