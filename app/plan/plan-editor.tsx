@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { ArrowRightLeft, Save, Trash2 } from "lucide-react";
 
 import type { WeeklyPlan } from "@/lib/plan-generator";
-import { getAlternativeExercises, saveAsRoutine, updateAvailableDays } from "./actions";
+import { getAlternativeExercises, saveAsNewPlan, updateAvailableDays } from "./actions";
 
 const DAYS: Array<{ d: number; short: string; label: string }> = [
   { d: 1, short: "Mon", label: "Monday" },
@@ -136,18 +136,19 @@ export function PlanEditor({
 
   const onSave = () => {
     setError(null);
-    const ok = window.confirm(
-      "This will replace your current routine with the new plan. Continue?",
+    const defaultName = `Generated Plan - ${new Date().toLocaleDateString()}`;
+    const planName = window.prompt(
+      "Name this plan:",
+      defaultName,
     );
-    if (!ok) return;
-
+    if (planName === null) return; // user cancelled
     startSave(async () => {
-      const res = await saveAsRoutine(plan);
-      if (!res.success) {
+      const res = await saveAsNewPlan(plan, planName);
+      if (!res.success || !res.planId) {
         setError(res.error ?? "Failed to save plan.");
         return;
       }
-      router.push("/protected");
+      router.push(`/plans/${res.planId}`);
       router.refresh();
     });
   };
@@ -195,7 +196,7 @@ export function PlanEditor({
           className="gap-2"
         >
           <Save className="h-4 w-4" />
-          {isSaving ? "Saving..." : "Save as my routine"}
+          {isSaving ? "Saving..." : "Save as new plan"}
         </Button>
       </div>
 

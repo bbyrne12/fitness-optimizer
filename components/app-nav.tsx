@@ -11,8 +11,8 @@ import { Menu } from "lucide-react";
 
 const NAV_LINKS = [
   { href: "/protected", label: "Dashboard" },
-  { href: "/plan", label: "My Plan" },
-  { href: "/routine", label: "Routine" },
+  { href: "/plans", label: "My Plans" },
+  { href: "/plan", label: "Generate Plan" },
   { href: "/log-workout", label: "Log Workout" },
   { href: "/exercises", label: "Exercises" },
 ] as const;

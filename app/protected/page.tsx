@@ -178,11 +178,20 @@ async function DashboardContent() {
 
   let hasRoutine = false;
   try {
-    const { count, error } = await supabase
-      .from("routines")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id);
-    if (!error && typeof count === "number") hasRoutine = count > 0;
+    const { data: activePlan } = await supabase
+      .from("plans")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (activePlan) {
+      const { count, error } = await supabase
+        .from("routines")
+        .select("id", { count: "exact", head: true })
+        .eq("plan_id", activePlan.id);
+      if (!error && typeof count === "number") hasRoutine = count > 0;
+    }
   } catch {
     hasRoutine = false;
   }
@@ -296,7 +305,7 @@ async function DashboardContent() {
           </CardContent>
           <CardFooter className="justify-end">
             <Button asChild variant="outline">
-              <Link href="/routine">Manage routine</Link>
+              <Link href="/plans">Manage plans</Link>
             </Button>
           </CardFooter>
         </Card>
@@ -338,7 +347,7 @@ async function DashboardContent() {
           </Card>
 
           <Card className="transition-colors hover:bg-accent">
-            <Link href="/routine" className="block">
+            <Link href="/plans" className="block">
               <CardHeader className="space-y-1">
                 <div className="flex items-center gap-3">
                   <div className="rounded-md border bg-background p-2">

@@ -29,6 +29,22 @@ export async function saveOnboardingProfile(payload: OnboardingPayload) {
 
   if (error) return { error: error.message };
 
+  // Ensure the user has a default plan to populate their dashboard
+  const { data: existingPlan } = await supabase
+    .from("plans")
+    .select("id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!existingPlan) {
+    await supabase.from("plans").insert({
+      user_id: user.id,
+      name: "My Routine",
+      source: "manual",
+      is_active: true,
+    });
+  }
+
   redirect("/protected");
 }
 
