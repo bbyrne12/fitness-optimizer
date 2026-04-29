@@ -54,7 +54,7 @@ async function ExercisePageContent() {
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Exercise Library</h1>
         <p className="text-sm text-muted-foreground">
-          Browse  {totalExercises} exercises. Search and filter to find what
+          Browse {totalExercises}  exercises. Search and filter to find what
           you&apos;re looking for.
         </p>
       </header>
