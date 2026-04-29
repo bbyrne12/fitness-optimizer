@@ -178,11 +178,20 @@ async function DashboardContent() {
 
   let hasRoutine = false;
   try {
-    const { count, error } = await supabase
-      .from("routines")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id);
-    if (!error && typeof count === "number") hasRoutine = count > 0;
+    const { data: activePlan } = await supabase
+      .from("plans")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (activePlan) {
+      const { count, error } = await supabase
+        .from("routines")
+        .select("id", { count: "exact", head: true })
+        .eq("plan_id", activePlan.id);
+      if (!error && typeof count === "number") hasRoutine = count > 0;
+    }
   } catch {
     hasRoutine = false;
   }

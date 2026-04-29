@@ -96,10 +96,28 @@ export async function RoutineAnalysisCard() {
     return null;
   }
 
+  const { data: activePlan } = await supabase
+    .from("plans")
+    .select("id, name")
+    .eq("user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (!activePlan) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Routine Analysis</CardTitle>
+          <CardDescription>You don&apos;t have an active plan yet. Create one to see your analysis.</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
   const { data, error } = await supabase
     .from("routines")
     .select("exercise_id, sets, reps, weight, day_of_week, exercises(name, primary_muscle, secondary_muscles)")
-    .eq("user_id", user.id);
+    .eq("plan_id", activePlan.id);
 
   if (error) {
     return (

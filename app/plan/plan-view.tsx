@@ -120,12 +120,21 @@ export async function PlanView() {
   const experience = p?.experience_level ?? "Beginner (less than 6 months)";
   const availableEquipment = Array.isArray(p?.available_equipment) ? p!.available_equipment : [];
 
-  const { data: routineJoin } = await supabase
-    .from("routines")
-    .select(
-      "exercise_id, sets, reps, weight, day_of_week, exercises(name, primary_muscle, secondary_muscles, equipment, difficulty)",
-    )
-    .eq("user_id", user.id);
+  const { data: activePlan } = await supabase
+    .from("plans")
+    .select("id, name")
+    .eq("user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  const { data: routineJoin } = activePlan
+    ? await supabase
+        .from("routines")
+        .select(
+          "exercise_id, sets, reps, weight, day_of_week, exercises(name, primary_muscle, secondary_muscles, equipment, difficulty)",
+        )
+        .eq("plan_id", activePlan.id)
+    : { data: [] as unknown[] };
 
   const rows = (routineJoin ?? []) as unknown as RoutineRow[];
   if (rows.length === 0) {
