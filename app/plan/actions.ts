@@ -82,21 +82,43 @@ export async function getAlternativeExercises(currentExerciseId: number, focus: 
   return { data: filtered, error: null as string | null };
 }
 
-export async function saveAsRoutine(plan: WeeklyPlan) {
+export async function saveAsNewPlan(plan: WeeklyPlan, planName: string) {
   const supabase = await createClient();
   const {
     data: { user },
     error: userError,
   } = await supabase.auth.getUser();
 
-  if (userError) return { success: false, error: userError.message };
-  if (!user) return { success: false, error: "Not authenticated" };
+  if (userError) return { success: false, error: userError.message, planId: null };
+  if (!user) return { success: false, error: "Not authenticated", planId: null };
 
+  const trimmedName = (planName || "").trim() || `Generated Plan ${new Date().toLocaleDateString()}`;
+
+  // Step 1: Create the new plan
+  const { data: newPlan, error: planError } = await supabase
+    .from("plans")
+    .insert({
+      user_id: user.id,
+      name: trimmedName,
+      source: "generated",
+      is_active: false,
+    })
+    .select("id")
+    .single();
+
+  if (planError || !newPlan) {
+    return { success: false, error: planError?.message ?? "Failed to create plan", planId: null };
+  }
+
+  const planId = (newPlan as { id: string }).id;
+
+  // Step 2: Build routine items linked to the new plan
   const items =
     plan?.days
       ?.flatMap((d) =>
         (d.exercises ?? []).map((ex) => ({
           user_id: user.id,
+          plan_id: planId,
           exercise_id: ex.exercise_id,
           sets: ex.sets,
           reps: ex.reps,
@@ -106,20 +128,19 @@ export async function saveAsRoutine(plan: WeeklyPlan) {
       )
       .filter((x) => Number.isFinite(x.exercise_id) && x.exercise_id > 0) ?? [];
 
-  const { error: deleteError } = await supabase
-    .from("routines")
-    .delete()
-    .eq("user_id", user.id);
-  if (deleteError) return { success: false, error: deleteError.message };
-
+  // Step 3: Insert all routine entries
   if (items.length > 0) {
     const { error: insertError } = await supabase.from("routines").insert(items);
-    if (insertError) return { success: false, error: insertError.message };
+    if (insertError) {
+      // Clean up the orphan plan if routine insert failed
+      await supabase.from("plans").delete().eq("id", planId);
+      return { success: false, error: insertError.message, planId: null };
+    }
   }
 
   revalidatePath("/protected");
-  revalidatePath("/routine");
-  return { success: true, error: null as string | null };
+  revalidatePath("/plans");
+  return { success: true, error: null as string | null, planId };
 }
 
 export async function updateAvailableDays(days: number[]) {
