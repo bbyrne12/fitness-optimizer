@@ -138,6 +138,31 @@ export async function saveAsNewPlan(plan: WeeklyPlan, planName: string) {
     }
   }
 
+  // If user's currently active plan has no exercises, auto-activate the new plan
+  const { data: activePlan } = await supabase
+    .from("plans")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (activePlan) {
+    const activeId = (activePlan as { id: string }).id;
+    const { count } = await supabase
+      .from("routines")
+      .select("id", { count: "exact", head: true })
+      .eq("plan_id", activeId);
+
+    if (typeof count === "number" && count === 0) {
+      // Deactivate the empty plan, then activate the new one
+      await supabase.from("plans").update({ is_active: false }).eq("id", activeId);
+      await supabase.from("plans").update({ is_active: true }).eq("id", planId);
+    }
+  } else {
+    // No active plan exists at all — make this one active
+    await supabase.from("plans").update({ is_active: true }).eq("id", planId);
+  }
+
   revalidatePath("/protected");
   revalidatePath("/plans");
   return { success: true, error: null as string | null, planId };
