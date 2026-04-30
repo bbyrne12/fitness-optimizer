@@ -30,6 +30,7 @@ function focusTopBorderClass(focus: string) {
   if (f === "upper") return "border-t-orange-500";
   if (f === "lower") return "border-t-purple-500";
   if (f === "full body") return "border-t-indigo-500";
+  if (f === "cardio") return "border-t-orange-500";
   return "border-t-gray-300";
 }
 
