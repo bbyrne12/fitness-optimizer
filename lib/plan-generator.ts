@@ -307,7 +307,7 @@ export function generateWeeklyPlan(input: PlanInput): WeeklyPlan {
       cardioCount,
       imbalanceMuscles,
       equipmentTags,
-      numDays >= 6 ? usedThisDay : usedAcrossWeek,
+      usedThisDay,
     );
 
     const isCardio = focus === "Cardio";

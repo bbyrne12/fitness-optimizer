@@ -81,9 +81,8 @@ export function PlanDetailEditor({
       .sort(([a], [b]) => a - b);
   }, [routines]);
 
-  const runSearch = async () => {
+  const runSearch = async (q: string) => {
     setError(null);
-    const q = searchQuery.trim();
     if (q.length < 2) {
       setSearchResults([]);
       return;
@@ -98,6 +97,13 @@ export function PlanDetailEditor({
     }
     setSearchResults(res.results);
   };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      runSearch(searchQuery.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const onAddExercise = (hit: ExerciseSearchHit) => {
     setError(null);
@@ -192,15 +198,12 @@ export function PlanDetailEditor({
                 id="exercise-search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); runSearch(); } }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); runSearch(searchQuery.trim()); } }}
                 placeholder="Search by name or muscle..."
                 className="border-zinc-700 bg-zinc-950 text-white placeholder:text-zinc-500"
               />
-              <Button type="button" onClick={runSearch} disabled={isSearching || searchQuery.trim().length < 2} className="bg-lime-400 text-zinc-950 hover:bg-lime-300">
-                <Search className="h-4 w-4" />
-                {isSearching ? "Searching" : "Search"}
-              </Button>
-            </div>
+              {isSearching && <span className="text-xs text-zinc-400">Searching...</span>}
+              </div>
 
             {searchResults.length > 0 && (
               <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">

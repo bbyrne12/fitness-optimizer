@@ -166,7 +166,7 @@ export async function PlanView() {
   let libQuery = supabase
     .from("exercises")
     .select("id, name, primary_muscle, secondary_muscles, equipment, difficulty")
-    .limit(200);
+    .limit(1000);
 
   if (allowed && allowed.size > 0) {
     const allowedArr = Array.from(allowed);
