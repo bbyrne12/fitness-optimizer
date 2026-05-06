@@ -1,5 +1,6 @@
 "use server";
 
+import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { getMuscleGroupCategory } from "@/lib/muscle-analysis";
@@ -166,6 +167,93 @@ export async function saveAsNewPlan(plan: WeeklyPlan, planName: string) {
   revalidatePath("/protected");
   revalidatePath("/plans");
   return { success: true, error: null as string | null, planId };
+}
+
+type EnhanceContext = {
+  experience: string;
+  primaryGoal: string | null;
+  imbalanceMuscles: string[];
+};
+
+export async function enhancePlanWithClaude(
+  plan: WeeklyPlan,
+  context: EnhanceContext,
+): Promise<{ coachingNote: string | null; exerciseRationales: Record<string, string> }> {
+  const empty = { coachingNote: null, exerciseRationales: {} as Record<string, string> };
+
+  try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return empty;
+
+    const client = new Anthropic({ apiKey });
+
+    const activeDays = plan.days
+      .filter((d) => d.focus !== "Rest" && d.exercises.length > 0)
+      .map((d) => ({
+        focus: d.focus,
+        exercises: d.exercises.map((ex) => ({
+          id: ex.exercise_id,
+          name: ex.name,
+          muscle: ex.primary_muscle,
+          sets: ex.sets,
+          reps: ex.reps,
+        })),
+      }));
+
+    const prompt = `You are a professional fitness coach reviewing a generated workout plan.
+
+User profile:
+- Experience: ${context.experience}
+- Goal: ${context.primaryGoal ?? "General fitness"}
+- Imbalances being targeted: ${context.imbalanceMuscles.length > 0 ? context.imbalanceMuscles.join(", ") : "none"}
+
+Generated plan (active training days only):
+${JSON.stringify(activeDays, null, 2)}
+
+Return a JSON object with exactly this shape:
+{
+  "coachingNote": "2-3 sentences. Personalized to this user's goal and experience. Motivating and specific — reference the split, the imbalances being addressed, or how the progression will work.",
+  "exerciseRationales": {
+    "<exercise_id as string>": "One specific motivating sentence (max 12 words) explaining why this exercise belongs in the plan."
+  }
+}
+
+Rules:
+- Include an entry in exerciseRationales for every exercise id that appears in the plan
+- Keys must be the numeric exercise id cast to a string (e.g. "42")
+- Do not suggest replacing any exercise — only write rationale text
+- If any day has obviously redundant exercises (same primary muscle twice), note it briefly in the coachingNote
+- Return only raw JSON. No markdown, no code fences.`;
+
+    const message = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const textBlock = message.content.find((b): b is Anthropic.TextBlock => b.type === "text");
+    if (!textBlock) return empty;
+
+    const parsed = JSON.parse(textBlock.text) as unknown;
+
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      typeof (parsed as Record<string, unknown>).coachingNote !== "string"
+    ) {
+      return empty;
+    }
+
+    const p = parsed as { coachingNote: string; exerciseRationales?: unknown };
+    const rationales =
+      typeof p.exerciseRationales === "object" && p.exerciseRationales !== null
+        ? (p.exerciseRationales as Record<string, string>)
+        : {};
+
+    return { coachingNote: p.coachingNote, exerciseRationales: rationales };
+  } catch {
+    return empty;
+  }
 }
 
 export async function updateAvailableDays(days: number[]) {
