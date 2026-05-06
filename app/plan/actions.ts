@@ -232,15 +232,24 @@ Rules:
     });
 
     const textBlock = message.content.find((b): b is Anthropic.TextBlock => b.type === "text");
-    if (!textBlock) return empty;
+    if (!textBlock) {
+      console.error("[enhancePlanWithClaude] no text block in response");
+      return empty;
+    }
 
-    const parsed = JSON.parse(textBlock.text) as unknown;
+    // Strip markdown code fences if the model included them despite instructions
+    const raw = textBlock.text.trim();
+    const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonText = fenceMatch ? fenceMatch[1].trim() : raw;
+
+    const parsed = JSON.parse(jsonText) as unknown;
 
     if (
       typeof parsed !== "object" ||
       parsed === null ||
       typeof (parsed as Record<string, unknown>).coachingNote !== "string"
     ) {
+      console.error("[enhancePlanWithClaude] unexpected response shape:", parsed);
       return empty;
     }
 
@@ -251,7 +260,8 @@ Rules:
         : {};
 
     return { coachingNote: p.coachingNote, exerciseRationales: rationales };
-  } catch {
+  } catch (err) {
+    console.error("[enhancePlanWithClaude] failed:", err);
     return empty;
   }
 }
