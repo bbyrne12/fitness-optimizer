@@ -19,6 +19,7 @@ import {
 } from "@/lib/plan-generator";
 
 import { PlanEditor } from "./plan-editor";
+import { enhancePlanWithClaude } from "./actions";
 
 type ProfileRow = {
   available_days: number[] | null;
@@ -194,6 +195,26 @@ export async function PlanView() {
     primaryGoal: p?.primary_goal ?? undefined,
   });
 
+  const { coachingNote, exerciseRationales } = await enhancePlanWithClaude(plan, {
+    experience,
+    primaryGoal: p?.primary_goal ?? null,
+    imbalanceMuscles,
+  });
+
+  const enhancedPlan: WeeklyPlan =
+    Object.keys(exerciseRationales).length > 0
+      ? {
+          ...plan,
+          days: plan.days.map((day) => ({
+            ...day,
+            exercises: day.exercises.map((ex) => {
+              const better = exerciseRationales[String(ex.exercise_id)];
+              return better ? { ...ex, rationale: better } : ex;
+            }),
+          })),
+        }
+      : plan;
+
   return (
     <div className="space-y-4">
       <div className="space-y-3">
@@ -238,7 +259,7 @@ export async function PlanView() {
         </div>
       </div>
 
-      <PlanEditor initialPlan={plan} initialAvailableDays={availableDays} />
+      <PlanEditor initialPlan={enhancedPlan} initialAvailableDays={availableDays} coachingNote={coachingNote} />
     </div>
   );
 }

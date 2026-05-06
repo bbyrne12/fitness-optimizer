@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { ArrowRightLeft, Save, Trash2 } from "lucide-react";
+import { ArrowRightLeft, Save, Sparkles, Trash2 } from "lucide-react";
 
 import type { WeeklyPlan } from "@/lib/plan-generator";
 import { getAlternativeExercises, saveAsNewPlan, updateAvailableDays } from "./actions";
@@ -39,9 +39,11 @@ type Alt = { id: number; name: string; primary_muscle: string };
 export function PlanEditor({
   initialPlan,
   initialAvailableDays,
+  coachingNote,
 }: {
   initialPlan: WeeklyPlan;
   initialAvailableDays: number[];
+  coachingNote?: string | null;
 }) {
   const router = useRouter();
   const [plan, setPlan] = useState<WeeklyPlan>(initialPlan);
@@ -177,6 +179,18 @@ export function PlanEditor({
 
   return (
     <div className="space-y-4">
+      {coachingNote && (
+        <div className="flex items-start gap-3 rounded-lg border border-lime-400/30 bg-lime-400/10 p-4 text-sm text-zinc-300">
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-lime-400" />
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-lime-400">
+              Coach&apos;s Note
+            </p>
+            <p>{coachingNote}</p>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-3">
         <div className="space-y-1">
           <p className="text-sm text-muted-foreground">
