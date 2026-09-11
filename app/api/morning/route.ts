@@ -34,9 +34,22 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const dry = url.searchParams.get("dry") === "1";
   const force = url.searchParams.get("force") === "1";
-  const db = admin();
 
   try {
+    // Inside the try on purpose: admin() throws when the service role key is
+    // missing, and outside it that surfaces as a bare 500 with no body.
+    const db = admin();
+
+    // Fail loudly and by name, rather than somewhere deep in a fetch.
+    const missing = ["SUPABASE_SERVICE_ROLE_KEY", "WHOOP_CLIENT_ID",
+                     "WHOOP_CLIENT_SECRET", "RESEND_API_KEY", "EMAIL_TO"]
+      .filter((k) => !process.env[k]);
+    if (missing.length && !dry) {
+      return NextResponse.json(
+        { error: `missing environment variables: ${missing.join(", ")}` },
+        { status: 500 });
+    }
+
     const [{ data: prof }, { data: setRows }] = await Promise.all([
       db.from("athlete_profile").select("config").eq("id", "singleton").single(),
       db.from("athlete_sets").select("day,exercise,weight,reps,sets,pin"),
@@ -96,7 +109,8 @@ export async function GET(req: NextRequest) {
       tunables: tun,
     };
 
-    if (dry) return NextResponse.json({ sent: false, dry: true, ...payload });
+    if (dry)
+      return NextResponse.json({ sent: false, dry: true, env_missing: missing, ...payload });
 
     const html = renderEmail({
       date: state.date, dow: state.dow, recovery: state.recovery,
