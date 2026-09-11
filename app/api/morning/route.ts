@@ -86,10 +86,12 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ sent: false, reason: "already emailed", day: state.date });
     }
 
-    // Longest recent run, to anchor the build.
+    // Longest run in the last three weeks: the anchor for the whole ladder.
+    // Three weeks rather than sixty days so a good run two months ago stops
+    // propping up a plan he is no longer training for.
     let recentLong = 2.5;
     for (const [day, xs] of Object.entries(state._workouts)) {
-      if (day <= new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10)) continue;
+      if (day <= new Date(Date.now() - 21 * 864e5).toISOString().slice(0, 10)) continue;
       for (const x of xs as any[])
         if (x.sport_name === "running" && x.score?.distance_meter)
           recentLong = Math.max(recentLong, x.score.distance_meter / 1609.34);
@@ -111,7 +113,8 @@ export async function GET(req: NextRequest) {
                                 intervalsReady: ready.intervals,
                                 easyMinutes: plan.easy_run_minutes });
     const dist = intensityDistribution(state._workouts as any, state.date);
-    const meso = mesocycle(plan.week_index, plan.weeks_out);
+    // Phase follows weeks actually trained, not weeks elapsed.
+    const meso = mesocycle(consistency, plan.weeks_out);
     const { per_week, flags } = imbalances(sets, state.date);
     const warns = loadWarnings(sets, state.date, tun);
 

@@ -181,17 +181,25 @@ export function readiness(weeks: number) {
 
 /* ------------------------------------------------------------------- plan */
 
-export function racePlan(raceDate: string, today: string, recentLongMi: number,
+export function racePlan(raceDate: string, today: string, achievedLongMi: number,
                          longestEver: number) {
   const weeksOut = Math.max(
     0,
     Math.floor((Date.parse(raceDate) - Date.parse(today)) / (7 * DAY)),
   );
-  const start = Math.max(recentLongMi, 3.0);
+  // Anchored on what has actually been run in the last three weeks, not on a
+  // position in a ladder written months ago. Recomputed every morning, so a
+  // missed fortnight moves the plan instead of leaving him chasing it.
+  const start = Math.max(achievedLongMi, 3.0);
   const peak = 11.0;
   const build = Math.max(1, weeksOut - 3);
   const growthWeeks = Math.max(1, build - 1 - Math.floor((build - 1) / 4));
-  const growth = (peak / start) ** (1 / growthWeeks);
+
+  // What growth rate would be needed, and what is actually safe.
+  const needed = (peak / start) ** (1 / growthWeeks);
+  const SAFE = 1.10;                      // the 10% rule, as a hard ceiling
+  const growth = Math.min(needed, SAFE);
+  const onTrack = needed <= SAFE;
 
   const schedule: number[] = [];
   let cur = start;
@@ -201,51 +209,57 @@ export function racePlan(raceDate: string, today: string, recentLongMi: number,
       schedule.push(Math.round(cur * 0.7 * 10) / 10);
     } else {
       if (i > 0) cur = Math.min(peak, cur * growth);
-      schedule.push(Math.round((lastBuild ? peak : cur) * 10) / 10);
+      schedule.push(Math.round(cur * 10) / 10);
     }
   }
+  // Where the build actually lands at a safe growth rate.
+  const reachable = Math.round(schedule[schedule.length - 1] * 10) / 10;
   schedule.push(
-    Math.round(peak * 0.72 * 10) / 10,
-    Math.round(peak * 0.45 * 10) / 10,
+    Math.round(reachable * 0.72 * 10) / 10,
+    Math.round(reachable * 0.45 * 10) / 10,
     13.1,
   );
 
-  const idx = Math.max(0, schedule.length - weeksOut - 1);
+  // The easy run is anchored on reality too: someone already running 6-mile
+  // long runs is not doing 25-minute midweek runs, and pretending otherwise
+  // would have the plan prescribe less than he already does.
+  const easyBase = Math.min(70, Math.max(25, Math.round((start * 10) / 1.8 / 5) * 5));
+  const easyMinutes = (weekIdx: number) =>
+    Math.min(70, easyBase + Math.floor(weekIdx / 3) * 5);
+  const ratio = (easyMin: number) => (easyMin >= 45 ? 1.8 : 1.4);
+  // The ratio caps GROWTH, never the anchor. It should stop the long run
+  // running away from the easy run; it should not tell him to go backwards
+  // from a distance he has already covered.
+  const cap = (weekIdx: number) => {
+    const e = easyMinutes(weekIdx);
+    return Math.max(start, Math.round((e * ratio(e)) / 10 * 10) / 10);
+  };
 
-  // The easy run has to grow too. A 25-minute midweek run cannot support a
-  // 110-minute long run -- the long run is meant to be 20-40% longer than the
-  // usual easy one, not three times it.
-  const weeksIn = idx;
-  const easyMinutes = Math.min(70, 25 + Math.floor(weeksIn / 3) * 5);
-  const rawLong = schedule[Math.min(idx, schedule.length - 1)];
-  // "20-40% longer than the usual easy run" is the beginner rule, and it is the
-  // right one while he is one. As the easy run passes 45 minutes he is no longer
-  // a beginner and half-marathon practice allows a longer ratio -- but the easy
-  // run still has to carry it, which is the whole point.
-  const ratio = easyMinutes >= 45 ? 1.8 : 1.4;
-  const capMi = Math.round((easyMinutes * ratio) / 10 * 10) / 10;
-  // Race day is the race. It is never capped by a training ratio.
-  const isRaceWeek = idx >= schedule.length - 1;
-  const cappedLong = isRaceWeek ? 13.1 : Math.min(rawLong, capMi);
-
+  const thisWeekRaw = schedule[0];
   return {
-    easy_run_minutes: easyMinutes,
-    long_run_capped: cappedLong < rawLong,
-    long_run_uncapped_mi: rawLong,
     race_date: raceDate,
     weeks_out: weeksOut,
-    long_run_this_week_mi: cappedLong,
+    long_run_this_week_mi: Math.min(thisWeekRaw, cap(0)),
+    easy_run_minutes: easyMinutes(0),
+    long_run_uncapped_mi: thisWeekRaw,
+    long_run_capped: thisWeekRaw > cap(0),
     schedule_all: schedule,
-    week_index: idx,
+    week_index: 0,
+    anchored_on_mi: start,
+    growth_per_week: Math.round((growth - 1) * 1000) / 10,
+    needed_growth_per_week: Math.round((needed - 1) * 1000) / 10,
+    on_track: onTrack,
+    reachable_peak_mi: reachable,
     longest_ever_mi: longestEver,
   };
 }
 
-/** Meso cycles: 3-6 week blocks, each with ONE job, each ending in a recovery
- *  week. "If you try to do all of them at once, nothing improves." Counted
- *  forward from the start of the build, not backward from the race, because
- *  the focus depends on what has been trained, not on what is coming. */
-export function mesocycle(weekIndex: number, weeksOut: number) {
+/** Meso cycles: 4-week blocks, each with ONE job, each ending in a recovery
+ *  week. "If you try to do all of them at once, nothing improves."
+ *
+ *  Blocks advance on weeks actually trained, not on weeks elapsed. Miss a
+ *  fortnight and the phase waits for you rather than moving on without you. */
+export function mesocycle(consistencyWeeks: number, weeksOut: number) {
   const phases = [
     { name: "Aerobic base", job: "3-4 easy runs, one slightly longer. No tempo, no intervals. Strength twice a week." },
     { name: "Volume tolerance", job: "Longer easy runs, long run grows 5-10 min per week. Still all easy." },
@@ -254,19 +268,18 @@ export function mesocycle(weekIndex: number, weeksOut: number) {
     { name: "Race-specific endurance", job: "The long run reaches its peak. Tempo holds at one a week, nothing more." },
     { name: "Sharpening", job: "Volume eases, a little speed returns. Nothing new is learned here -- it is all consolidation." },
   ];
-  const block = Math.floor(weekIndex / 4);
-  const weekInBlock = weekIndex % 4;
+  const block = Math.floor(consistencyWeeks / 4);
+  const weekInBlock = consistencyWeeks % 4;
   const taper = weeksOut <= 3;
+  const phase = phases[Math.min(block, phases.length - 1)];
   return {
-    phase: taper ? "Taper" : phases[Math.min(block, phases.length - 1)].name,
+    phase: taper ? "Taper" : phase.name,
     job: taper
       ? "Volume down, intensity low, sleep up. The work is already done."
-      : phases[Math.min(block, phases.length - 1)].job,
+      : phase.job,
     week_in_block: weekInBlock + 1,
-    // Every block ends with a recovery week: volume down 20-30%, intensity
-    // low, mobility and strength up. Skipping these is how people plateau.
-    // The exception is the peak week immediately before the taper -- the build
-    // never ends on a cutback, so that week is the peak, not a recovery week.
+    // The build never ends on a cutback, so the week before the taper is the
+    // peak, not a recovery week.
     recovery_week: !taper && weekInBlock === 3 && weeksOut > 4,
   };
 }

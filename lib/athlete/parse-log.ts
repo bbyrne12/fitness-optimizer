@@ -1,0 +1,136 @@
+/**
+ * Parser for the Apple Notes workout log, ported from whoop-dashboard/parse_workouts.py.
+ *
+ * The point is that the format never has to change. This reads what he already
+ * writes -- three years and 293 sessions of it -- rather than asking him to
+ * adopt a new one:
+ *
+ *   1/4:                       date header (year from a "Workouts 26" line)
+ *   X4:                        block multiplier, applies until the next blank
+ *   Leg press: 340 x 12        weight x reps
+ *   Bench: 95 x 10, 10, 6      several sets at one weight
+ *   Bench: 50 x 9, 60 x 8      several weight/rep pairs on one line
+ *   Seated rows: 7th from top  machine pin position, no numeric weight
+ *   Calf raises: 50 x 40 (25)  parenthetical is a note, not a set
+ *   Pushups: 25 x 3            bodyweight: reps x sets
+ *   ... 130 x 12 ^             his own progression marker
+ *
+ * A line with no set count written means DEFAULT_SETS, which is his stated
+ * convention.
+ */
+export const DEFAULT_SETS = 3;
+
+export type ParsedSet = {
+  day: string;
+  exercise: string;
+  weight: number | null;
+  reps: number | null;
+  sets: number;
+  pin: string | null;
+  notes: string | null;
+};
+
+const DATE_RE = /^(\d{1,2})\/(\d{1,2}):?\s*$/;
+const YEAR_RE = /^Workouts\s+(\d{2})\s*$/i;
+const MULT_RE = /^[Xx](\d+):?\s*$/;
+const PIN_RE = /(\d+)(?:st|nd|rd|th)\s+from\s+(top|bottom)/i;
+const SET_RE = /(\d+(?:\.\d+)?)\s*(?:lbs?|kg)?\s*[xX]\s*([\d,\s]+)/g;
+
+const BODYWEIGHT = ["pushup", "sit up", "plank", "dead bug", "toe touch",
+  "knee tuck", "tuck jump", "copenhagen", "mountain climber"];
+
+const SKIP = ["ab workout", "resistance band", "bands", "superset", "explosive",
+  "neck exercises", "to add", "mid-back", "agility ladder", "ladder to sprint",
+  "(ankle workout)", "scissors", "jumping jack", "icky shuffle", "hops and run",
+  "hopscotch", "in-in-out-out", "in x 2"];
+
+export type ParseResult = {
+  sets: ParsedSet[];
+  days: number;
+  unparsed: string[];
+  years: number[];
+};
+
+export function parseLog(text: string, fallbackYear?: number): ParseResult {
+  const out: ParsedSet[] = [];
+  const unparsed: string[] = [];
+  const years = new Set<number>();
+  let year = fallbackYear ?? new Date().getFullYear();
+  let day: string | null = null;
+  let mult = 1;
+
+  for (const raw of text.split(/\r?\n/)) {
+    const s = raw.trim();
+    if (!s) { mult = 1; continue; }
+
+    const ym = YEAR_RE.exec(s);
+    if (ym) { year = 2000 + parseInt(ym[1]); years.add(year); continue; }
+
+    const dm = DATE_RE.exec(s);
+    if (dm) {
+      const mo = parseInt(dm[1]), dy = parseInt(dm[2]);
+      const d = new Date(Date.UTC(year, mo - 1, dy));
+      day = d.getUTCMonth() === mo - 1 ? d.toISOString().slice(0, 10) : null;
+      if (day) years.add(year);
+      mult = 1;
+      continue;
+    }
+
+    const mm = MULT_RE.exec(s);
+    if (mm) { mult = parseInt(mm[1]); continue; }
+
+    if (!day || !s.includes(":")) continue;
+    const low = s.toLowerCase();
+    if (SKIP.some((k) => low.includes(k))) continue;
+
+    const i = s.indexOf(":");
+    const name = s.slice(0, i).trim();
+    const rest = s.slice(i + 1).trim();
+    if (!name || !rest) continue;
+
+    const notes = [...rest.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]);
+    const body = rest.replace(/\([^)]*\)/g, "").replace(/\^/g, "").trim();
+
+    const pm = PIN_RE.exec(body);
+    const pin = pm ? `${pm[1]} from ${pm[2]}` : null;
+
+    const bw = BODYWEIGHT.some((b) => name.toLowerCase().includes(b));
+    const entries: { weight: number | null; reps: number | null; sets: number }[] = [];
+
+    SET_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = SET_RE.exec(body)) !== null) {
+      const w = parseFloat(m[1]);
+      const reps = (m[2].match(/\d+/g) ?? []).map(Number);
+      if (bw) {
+        entries.push({ weight: null, reps: Math.round(w), sets: reps[0] ?? 1 });
+      } else {
+        for (const r of reps) entries.push({ weight: w, reps: r, sets: 1 });
+      }
+    }
+
+    if (!entries.length && pin === null) {
+      // Time-based holds and prose land here. Kept out of the set maths, but
+      // surfaced so nothing disappears silently.
+      if (/\d/.test(body)) unparsed.push(s);
+      continue;
+    }
+    if (!entries.length) entries.push({ weight: null, reps: null, sets: 1 });
+
+    const explicit = entries.length > 1 || mult > 1 || bw;
+    for (const e of entries) {
+      out.push({
+        day, exercise: name, weight: e.weight, reps: e.reps,
+        sets: explicit ? e.sets * mult : DEFAULT_SETS,
+        pin, notes: notes.join("; ") || null,
+      });
+    }
+  }
+
+  return {
+    sets: out,
+    days: new Set(out.map((r) => r.day)).size,
+    unparsed,
+    years: [...years].sort(),
+  };
+}

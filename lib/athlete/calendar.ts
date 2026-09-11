@@ -85,19 +85,23 @@ export function buildCalendar(opts: {
   const firstMonday = monday(today);
 
   for (let w = 0; w < plan.weeks_out + 1; w++) {
-    const idx = plan.week_index + w;
+    const idx = w;
     const start = shift(firstMonday, w * 7);
-    const meso = mesocycle(idx, plan.weeks_out - w);
+    // Phase reflects weeks actually trained, plus the weeks ahead in this plan.
+    const meso = mesocycle(opts.consistencyWeeks + w, plan.weeks_out - w);
 
     // Long run and easy run both grow; the long run stays 1.4x the easy run at
     // most, because a long run three times the usual one is how people get hurt.
     const longMi = plan.schedule_all[Math.min(idx, plan.schedule_all.length - 1)];
-    const easyMin = Math.min(70, 25 + Math.floor(idx / 3) * 5);
+    const easyBase = Math.min(70, Math.max(25,
+      Math.round((plan.anchored_on_mi * 10) / 1.8 / 5) * 5));
+    const easyMin = Math.min(70, easyBase + Math.floor(idx / 3) * 5);
     const ratio = easyMin >= 45 ? 1.8 : 1.4;
     const isRaceWeek = w === plan.weeks_out;
     const cappedLong = isRaceWeek
       ? 13.1
-      : Math.min(longMi, Math.round((easyMin * ratio) / 10 * 10) / 10);
+      : Math.min(longMi, Math.max(plan.anchored_on_mi,
+          Math.round((easyMin * ratio) / 10 * 10) / 10));
 
     const days: CalendarDay[] = DOW.map((dw, i) => {
       const date = shift(start, i);
