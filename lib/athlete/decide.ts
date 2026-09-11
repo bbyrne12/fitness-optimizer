@@ -6,6 +6,7 @@
  * this one can be read side by side and seen to agree.
  */
 import { musclesFor, bucket, LOWER } from "./muscles";
+import { INTENSITY_TARGET, CADENCE_TARGET } from "./protocols";
 
 export const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
@@ -337,6 +338,55 @@ export function imbalances(sets: LoggedSet[], today: string, weeks = 8) {
   return { per_week: per, flags };
 }
 
+/** Where training time actually sits, against the polarized model.
+ *  Easy = zones 0-2, threshold = zone 3, hard = zones 4-5. */
+export function intensityDistribution(workouts: Record<string, any[]>,
+                                      today: string, days = 60) {
+  const cut = shift(today, -days);
+  let easy = 0, thr = 0, hard = 0;
+  for (const [day, xs] of Object.entries(workouts)) {
+    if (day < cut) continue;
+    for (const x of xs) {
+      const z = x.score?.zone_durations;
+      if (!z) continue;
+      easy += (z.zone_zero_milli ?? 0) + (z.zone_one_milli ?? 0) + (z.zone_two_milli ?? 0);
+      thr  += z.zone_three_milli ?? 0;
+      hard += (z.zone_four_milli ?? 0) + (z.zone_five_milli ?? 0);
+    }
+  }
+  const tot = easy + thr + hard;
+  if (!tot) return null;
+  return {
+    easy: easy / tot, threshold: thr / tot, hard: hard / tot,
+    hard_minutes: Math.round(hard / 60000), total_minutes: Math.round(tot / 60000),
+  };
+}
+
+/** Flags that come from the research protocols rather than from volume. */
+export function protocolFlags(dist: ReturnType<typeof intensityDistribution>) {
+  const flags = [];
+  if (dist) {
+    if (dist.hard < INTENSITY_TARGET.hard_min)
+      flags.push({ severity: "high",
+        title: "Almost no hard work in the last 60 days",
+        detail: `${dist.hard_minutes} min in zones 4-5 out of ${dist.total_minutes} ` +
+                `(${(dist.hard * 100).toFixed(1)}%). Polarized training is ~80% easy ` +
+                `AND ~20% hard, not all easy. VO2 max has fallen 57 to 52 over the ` +
+                `same window.` });
+    if (dist.threshold > INTENSITY_TARGET.threshold_max)
+      flags.push({ severity: "medium",
+        title: "Too much time at threshold",
+        detail: `${(dist.threshold * 100).toFixed(1)}% in zone 3. That is the zone ` +
+                `that costs the most recovery for the least adaptation.` });
+  }
+  flags.push({ severity: "medium", title: "Cadence is below the tibial-load threshold",
+    detail: `Last measured ${CADENCE_TARGET.current} spm; target ` +
+            `${CADENCE_TARGET.target_low}-${CADENCE_TARGET.target_high}. WHOOP does ` +
+            `not report cadence, so this comes from your watch and has to be ` +
+            `entered by hand.` });
+  return flags;
+}
+
 /* --------------------------------------------------------- prescription */
 
 const ADDITIONS: Record<string, [string, string, string]> = {
@@ -353,7 +403,9 @@ const ADDITIONS: Record<string, [string, string, string]> = {
 };
 
 export function prescribe(sets: LoggedSet[], planned: string, level: string,
-                          z2: number, longMi: number) {
+                          z2: number, longMi: number, opts: {
+                            hrvStreak?: number; basePhase?: boolean;
+                          } = {}) {
   const items: string[] = [];
   let source: string | null = null;
 
@@ -387,7 +439,20 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   if (planned === "lacrosse")
     items.push("Lacrosse — 6pm. That is the whole session.");
 
+  // Strides: top-end work that costs almost nothing in recovery, which is how
+  // the polarized model gets its hard fraction back without a new session.
+  if (opts.basePhase === false && level === "green" &&
+      (planned === "run" || planned === "pull+run"))
+    items.push("Strides — 6 x 20s fast, full recovery between");
+
   let add = ADDITIONS[planned];
+  // HRV is the stated primary goal, so when it is the thing that is off, the
+  // breathing protocol outranks whatever else was scheduled for today.
+  if ((opts.hrvStreak ?? 0) >= 2)
+    add = ["Slow breathing", "10 min at 6 breaths/min",
+           "HRV has been below its band. Slow breathing is the best-evidenced " +
+           "way to raise RMSSD: 5-15 ms over 4-6 weeks."];
+
   if (level === "red") return { items: ["Walk if you want to move."], source_date: null, add: null, hold: true };
 
   return {

@@ -15,8 +15,10 @@ import { accessToken, pull } from "@/lib/athlete/whoop";
 import { renderEmail, sendEmail } from "@/lib/athlete/email";
 import {
   buildState, racePlan, weekTemplate, decide, prescribe,
-  imbalances, loadWarnings, DEFAULT_TUNABLES, type LoggedSet, type Tunables,
+  imbalances, loadWarnings, intensityDistribution, protocolFlags,
+  DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
+import { PROTOCOLS } from "@/lib/athlete/protocols";
 
 // No `dynamic = "force-dynamic"`: this project has cacheComponents on, which
 // rejects it, and reading the Authorization header already makes the route
@@ -97,15 +99,24 @@ export async function GET(req: NextRequest) {
     const template = weekTemplate(cfg.lacrosse.days);
     const z2 = cfg.athlete.zone2_ceiling_bpm;
     const decision = decide(state, plan, template, tun, z2);
+    // Base phase is the first two thirds of the build: easy volume only.
+    // After that, strides go back in to arrest the VO2 max slide.
+    const basePhase = plan.weeks_out > 18;
     const session = prescribe(sets, decision.planned, decision.level, z2,
-                              plan.long_run_this_week_mi);
+                              plan.long_run_this_week_mi,
+                              { hrvStreak: state.hrv_low_streak, basePhase });
+    const dist = intensityDistribution(state._workouts as any, state.date);
     const { per_week, flags } = imbalances(sets, state.date);
     const warns = loadWarnings(sets, state.date, tun);
 
     const payload = {
       state: { ...state, _workouts: undefined },
       decision, session, plan, week: template,
-      volume_per_week: per_week, imbalances: flags, load_warnings: warns,
+      volume_per_week: per_week,
+      imbalances: [...flags, ...protocolFlags(dist)],
+      load_warnings: warns, intensity: dist,
+      protocols: PROTOCOLS.map(({ id, title, source, confidence, reviewed }) =>
+        ({ id, title, source, confidence, reviewed })),
       tunables: tun,
     };
 
