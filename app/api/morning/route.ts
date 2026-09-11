@@ -133,6 +133,7 @@ export async function GET(req: NextRequest) {
       date: state.date, dow: state.dow, recovery: state.recovery,
       decision, session,
       dashboardUrl: cfg.dashboard_url ?? "",
+      phase: { phase: meso.phase, job: meso.job, recovery_week: meso.recovery_week },
     });
     const { id } = await sendEmail(
       `${decision.call}  (${Math.round(state.recovery)}% recovered)`, html);

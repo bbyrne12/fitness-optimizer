@@ -98,6 +98,7 @@ export function buildState(w: Rec) {
   const within30 = days.filter((d) => d > shift(today, -30));
   const hist = within30.map((d) => rec[d].hrv_rmssd_milli);
   const rhist = within30.map((d) => rec[d].recovery_score);
+  const rhrHist = within30.map((d) => rec[d].resting_heart_rate);
 
   // Consecutive mornings HRV has sat below its own band. One is noise.
   let hrvStreak = 0;
@@ -136,6 +137,7 @@ export function buildState(w: Rec) {
     hrv_sd: hist.length > 1 ? sd(hist) : 0,
     rhr: r.resting_heart_rate,
     recovery_baseline: rhist.length ? mean(rhist) : null,
+    rhr_baseline: rhrHist.length ? mean(rhrHist) : null,
     sleep_hours: Math.round(sleptH * 10) / 10,
     sleep_debt_h:
       Math.round(((need.need_from_sleep_debt_milli ?? 0) / 3.6e6) * 10) / 10,
@@ -214,11 +216,17 @@ export function racePlan(raceDate: string, today: string, recentLongMi: number,
   // 110-minute long run -- the long run is meant to be 20-40% longer than the
   // usual easy one, not three times it.
   const weeksIn = idx;
-  const easyMinutes = Math.min(60, 25 + Math.floor(weeksIn / 3) * 5);
+  const easyMinutes = Math.min(70, 25 + Math.floor(weeksIn / 3) * 5);
   const rawLong = schedule[Math.min(idx, schedule.length - 1)];
-  // ~10 min/mi at easy effort, so cap the long run at 1.4x the easy run.
-  const capMi = Math.round((easyMinutes * 1.4) / 10 * 10) / 10;
-  const cappedLong = Math.min(rawLong, capMi);
+  // "20-40% longer than the usual easy run" is the beginner rule, and it is the
+  // right one while he is one. As the easy run passes 45 minutes he is no longer
+  // a beginner and half-marathon practice allows a longer ratio -- but the easy
+  // run still has to carry it, which is the whole point.
+  const ratio = easyMinutes >= 45 ? 1.8 : 1.4;
+  const capMi = Math.round((easyMinutes * ratio) / 10 * 10) / 10;
+  // Race day is the race. It is never capped by a training ratio.
+  const isRaceWeek = idx >= schedule.length - 1;
+  const cappedLong = isRaceWeek ? 13.1 : Math.min(rawLong, capMi);
 
   return {
     easy_run_minutes: easyMinutes,
@@ -240,9 +248,11 @@ export function racePlan(raceDate: string, today: string, recentLongMi: number,
 export function mesocycle(weekIndex: number, weeksOut: number) {
   const phases = [
     { name: "Aerobic base", job: "3-4 easy runs, one slightly longer. No tempo, no intervals. Strength twice a week." },
-    { name: "Volume progression", job: "Longer easy runs, long run grows 5-10 min per week. Still all easy." },
-    { name: "Tempo introduction", job: "One tempo session a week. Long run stays controlled -- never add length and intensity together." },
-    { name: "Speed economy", job: "Strides and short intervals. Volume holds steady." },
+    { name: "Volume tolerance", job: "Longer easy runs, long run grows 5-10 min per week. Still all easy." },
+    { name: "Volume progression", job: "Easy volume keeps climbing. The long run is the only session that changes much." },
+    { name: "Tempo introduction", job: "One tempo a week, inside an easy session. Long run stays controlled -- never add length and intensity together." },
+    { name: "Race-specific endurance", job: "The long run reaches its peak. Tempo holds at one a week, nothing more." },
+    { name: "Sharpening", job: "Volume eases, a little speed returns. Nothing new is learned here -- it is all consolidation." },
   ];
   const block = Math.floor(weekIndex / 4);
   const weekInBlock = weekIndex % 4;
@@ -255,7 +265,9 @@ export function mesocycle(weekIndex: number, weeksOut: number) {
     week_in_block: weekInBlock + 1,
     // Every block ends with a recovery week: volume down 20-30%, intensity
     // low, mobility and strength up. Skipping these is how people plateau.
-    recovery_week: !taper && weekInBlock === 3,
+    // The exception is the peak week immediately before the taper -- the build
+    // never ends on a cutback, so that week is the peak, not a recovery week.
+    recovery_week: !taper && weekInBlock === 3 && weeksOut > 4,
   };
 }
 
@@ -580,6 +592,21 @@ export function decide(state: ReturnType<typeof buildState>,
   if (state.hrv_low_streak >= tun.hrv_low_streak_downgrade) {
     reasons.push(`HRV has been below its band ${state.hrv_low_streak} mornings running — that is a deload signal, not a bad night.`);
     level = down(level);
+  }
+
+  // Resting HR against its own baseline: +5 mild, +10 skip hard sessions,
+  // +15 do not train. One of the earliest warning signs of illness incubating
+  // or training stress accumulating.
+  const rhrUp = state.rhr_baseline ? state.rhr - state.rhr_baseline : 0;
+  if (rhrUp >= 15) {
+    reasons.push(`Resting HR is ${rhrUp.toFixed(0)} bpm over baseline — that is ` +
+                 `the "do not train" threshold, and often illness incubating.`);
+    level = "red";
+  } else if (rhrUp >= 10) {
+    reasons.push(`Resting HR is ${rhrUp.toFixed(0)} bpm over baseline — skip anything hard.`);
+    level = down(level);
+  } else if (rhrUp >= 5) {
+    reasons.push(`Resting HR is ${rhrUp.toFixed(0)} bpm over baseline — mild system stress.`);
   }
 
   const tw = state.run_minutes_this_week, lw = state.run_minutes_last_week;

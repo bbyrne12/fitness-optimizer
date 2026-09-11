@@ -20,8 +20,10 @@ type Session = {
 
 export function renderEmail(opts: {
   date: string; dow: string; recovery: number;
-  decision: { level: string; call: string };
+  decision: { level: string; call: string; deload_advised?: boolean };
   session: Session; dashboardUrl: string;
+  phase?: { phase: string; job: string; recovery_week: boolean };
+  calendarUrl?: string;
 }) {
   const { date, dow, recovery, decision: dec, session: ses, dashboardUrl } = opts;
   const c = STATE[dec.level];
@@ -43,6 +45,26 @@ export function renderEmail(opts: {
     ? `<div style="font:400 12px ${SANS};color:${MUTED};padding-top:10px">Hold the weights where they were today.</div>`
     : "";
 
+  const phase = opts.phase
+    ? `<div style="border-top:1px solid ${LINE};margin-top:20px;padding-top:14px">
+         <div style="font:500 9px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:${DIM}">
+           This block${opts.phase.recovery_week ? " &middot; recovery week" : ""}
+         </div>
+         <div style="font:500 14px ${SANS};color:${FG};padding-top:5px">${opts.phase.phase}</div>
+         <div style="font:400 12px ${SANS};color:${MUTED};padding-top:4px;line-height:1.5">${opts.phase.job}</div>
+       </div>`
+    : "";
+
+  const deload = dec.deload_advised
+    ? `<div style="border:1px solid #5a3a1a;background:#1d1409;padding:12px 14px;margin-top:16px">
+         <div style="font:500 9px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:#f59e0b">Recovery week advised</div>
+         <div style="font:400 12px ${SANS};color:${MUTED};padding-top:5px;line-height:1.5">
+           HRV has been under its band five mornings or more. Drop volume 20-30% for a
+           week, keep intensity low, raise mobility work. This is not losing fitness.
+         </div>
+       </div>`
+    : "";
+
   return `<div style="background:${BG};padding:24px 14px;font-family:${SANS}">
 <div style="max-width:440px;margin:0 auto">
   <div style="font:500 10px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:${DIM};padding-bottom:14px">
@@ -54,6 +76,8 @@ export function renderEmail(opts: {
   <div style="padding-top:20px">${rows}</div>
   ${hold}
   ${add}
+  ${deload}
+  ${phase}
   <div style="padding-top:22px">
     <a href="${dashboardUrl}" style="font:400 12px ${MONO};color:${DIM};text-decoration:none">Why &rarr;</a>
   </div>
