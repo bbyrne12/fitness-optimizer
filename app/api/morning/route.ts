@@ -16,7 +16,7 @@ import { renderEmail, sendEmail } from "@/lib/athlete/email";
 import {
   buildState, racePlan, weekTemplate, decide, prescribe,
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
-  runConsistencyWeeks, readiness,
+  runConsistencyWeeks, readiness, mesocycle,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
@@ -111,6 +111,7 @@ export async function GET(req: NextRequest) {
                                 intervalsReady: ready.intervals,
                                 easyMinutes: plan.easy_run_minutes });
     const dist = intensityDistribution(state._workouts as any, state.date);
+    const meso = mesocycle(plan.week_index, plan.weeks_out);
     const { per_week, flags } = imbalances(sets, state.date);
     const warns = loadWarnings(sets, state.date, tun);
 
@@ -119,7 +120,7 @@ export async function GET(req: NextRequest) {
       decision, session, plan, week: template,
       volume_per_week: per_week,
       imbalances: [...flags, ...protocolFlags(dist)],
-      load_warnings: warns, intensity: dist, readiness: ready,
+      load_warnings: warns, intensity: dist, readiness: ready, meso,
       protocols: PROTOCOLS.map(({ id, title, source, confidence, reviewed }) =>
         ({ id, title, source, confidence, reviewed })),
       tunables: tun,

@@ -233,6 +233,32 @@ export function racePlan(raceDate: string, today: string, recentLongMi: number,
   };
 }
 
+/** Meso cycles: 3-6 week blocks, each with ONE job, each ending in a recovery
+ *  week. "If you try to do all of them at once, nothing improves." Counted
+ *  forward from the start of the build, not backward from the race, because
+ *  the focus depends on what has been trained, not on what is coming. */
+export function mesocycle(weekIndex: number, weeksOut: number) {
+  const phases = [
+    { name: "Aerobic base", job: "3-4 easy runs, one slightly longer. No tempo, no intervals. Strength twice a week." },
+    { name: "Volume progression", job: "Longer easy runs, long run grows 5-10 min per week. Still all easy." },
+    { name: "Tempo introduction", job: "One tempo session a week. Long run stays controlled -- never add length and intensity together." },
+    { name: "Speed economy", job: "Strides and short intervals. Volume holds steady." },
+  ];
+  const block = Math.floor(weekIndex / 4);
+  const weekInBlock = weekIndex % 4;
+  const taper = weeksOut <= 3;
+  return {
+    phase: taper ? "Taper" : phases[Math.min(block, phases.length - 1)].name,
+    job: taper
+      ? "Volume down, intensity low, sleep up. The work is already done."
+      : phases[Math.min(block, phases.length - 1)].job,
+    week_in_block: weekInBlock + 1,
+    // Every block ends with a recovery week: volume down 20-30%, intensity
+    // low, mobility and strength up. Skipping these is how people plateau.
+    recovery_week: !taper && weekInBlock === 3,
+  };
+}
+
 export type Slot = [string, string];
 
 export function weekTemplate(lacrosseDays: string[]): Record<string, Slot> {
@@ -424,6 +450,11 @@ export function protocolFlags(dist: ReturnType<typeof intensityDistribution>) {
         detail: `${(dist.threshold * 100).toFixed(1)}% in zone 3. That is the zone ` +
                 `that costs the most recovery for the least adaptation.` });
   }
+  flags.push({ severity: "medium", title: "One rest day a week, against an HRV goal",
+    detail: "The HRV-shaped week is 3-4 easy cardio days, at most one hard, and " +
+            "2-3 days of rest or active recovery. With lacrosse twice plus three " +
+            "lifts, this week has one. That is trainable, but it is not an " +
+            "HRV-maximising week -- worth knowing which you are choosing." });
   flags.push({ severity: "low", title: "Cadence is below the tibial-load threshold",
     detail: `Last measured ${CADENCE_TARGET.current} spm; target ` +
             `${CADENCE_TARGET.target_low}-${CADENCE_TARGET.target_high}. WHOOP does ` +
@@ -447,6 +478,9 @@ const ADDITIONS: Record<string, [string, string, string]> = {
     "Rear delts and scap control. Cheap insurance for the shoulder."],
   rest: ["Ab circuit", "10 min",
     "Core is 0.2 sets/wk. A rest day is where it fits."],
+  legs2: ["Mobility and isometric block", "15 min",
+    "Second of two weekly sessions. Ankle holds, calf holds, hip bridge, side " +
+    "plank. Tendons take months to strengthen; this is the quiet foundation."],
   "long run": ["Mobility and isometric block", "15 min after the run",
     "Ankle holds 2x45s, bent-knee calf holds 2x40s, hip bridge 3x30s, side " +
     "plank 2x30s. Joint and tendon work -- the insurance for rising mileage, " +
@@ -536,6 +570,13 @@ export function decide(state: ReturnType<typeof buildState>,
   }
   if (state.hrv_baseline && state.hrv < state.hrv_baseline - state.hrv_sd)
     reasons.push(`HRV ${Math.round(state.hrv)}ms is more than 1 SD below your 30-day ${Math.round(state.hrv_baseline)}ms.`);
+  // 5+ mornings is no longer "back off today" -- it is a rest week.
+  const deload = state.hrv_low_streak >= 5;
+  if (deload) {
+    reasons.push(`HRV has been below its band ${state.hrv_low_streak} mornings. ` +
+                 `At 5+ the answer is a recovery week, not a lighter day: ` +
+                 `volume down 20-30%, intensity low, mobility up.`);
+  }
   if (state.hrv_low_streak >= tun.hrv_low_streak_downgrade) {
     reasons.push(`HRV has been below its band ${state.hrv_low_streak} mornings running — that is a deload signal, not a bad night.`);
     level = down(level);
@@ -582,5 +623,6 @@ export function decide(state: ReturnType<typeof buildState>,
     detail = "Bench stays at 95 with pauses until the shoulder says otherwise.";
   }
 
-  return { level, call, detail, planned, why_today: why, reasons, zone2_ceiling: z2 };
+  return { level, call, detail, planned, why_today: why, reasons,
+           zone2_ceiling: z2, deload_advised: deload };
 }
