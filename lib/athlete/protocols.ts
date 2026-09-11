@@ -88,6 +88,57 @@ export const PROTOCOLS: Protocol[] = [
     reviewed: "2026-09-11",
     confidence: "moderate",
   },
+  {
+    id: "long-run-ratio",
+    title: "Long run relative to the usual easy run",
+    finding:
+      "A long run should be 20-40% longer than your usual easy run -- not " +
+      "double, not extreme -- and should feel easier than you want it to. Once " +
+      "a long run becomes moderate or hard effort, recovery cost rises sharply, " +
+      "injury risk jumps, and the aerobic adaptation it exists for is reduced.",
+    applied:
+      "The easy run has to grow alongside the long one. A 25-minute easy run " +
+      "cannot support a 110-minute long run; the ladder to 13.1 only works if " +
+      "midweek duration climbs with it.",
+    source: "Ruut Labs HRV course, topic 11.5 (run types)",
+    query: "long run 20-40% longer than easy run duration not intensity",
+    reviewed: "2026-09-11",
+    confidence: "moderate",
+  },
+  {
+    id: "readiness-gates",
+    title: "Readiness criteria for adding run types",
+    finding:
+      "Long runs: after 3-4 weeks of consistent running. Tempo: after 2-3 " +
+      "months. Intervals: after 4-6 months, with all other run types " +
+      "comfortable and recovery strong. Adding a run type before the criteria " +
+      "are met is described as the fastest way to invite injury.",
+    applied:
+      "Gates on measured consistency -- consecutive weeks with at least two " +
+      "runs -- rather than on weeks remaining until the race. The calendar does " +
+      "not know whether the training happened.",
+    source: "Ruut Labs HRV course, topic 11.4 (readiness criteria)",
+    query: "when to add long runs tempo intervals readiness criteria beginner",
+    reviewed: "2026-09-11",
+    confidence: "moderate",
+  },
+  {
+    id: "runner-isometrics",
+    title: "Mobility and isometric strength for runners",
+    finding:
+      "A 15-20 minute calm block: ankle isometric holds 2 x 45s, bent-knee calf " +
+      "holds 2 x 40s, hip bridge holds 3 x 30s, side plank 2 x 30s, spinal " +
+      "mobility 3 min. Framed as joint protection and tendon strength -- the " +
+      "work that keeps injuries away once mileage increases.",
+    applied:
+      "Hits three open flags at once: calves at 1.4 sets/wk, core at 0.2, and " +
+      "the shin history. Cheaper than adding a session, and it is the same " +
+      "tissue the 2024 ankle rehab block was protecting.",
+    source: "Ruut Labs HRV course, topic 11.3 (foundation session)",
+    query: "runner ankle isometric calf holds hip bridge injury prevention mileage",
+    reviewed: "2026-09-11",
+    confidence: "moderate",
+  },
 ];
 
 /** Polarized targets, as fractions of total training time. */

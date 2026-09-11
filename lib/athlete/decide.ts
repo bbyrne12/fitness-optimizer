@@ -148,6 +148,35 @@ export function buildState(w: Rec) {
   };
 }
 
+/** Consecutive recent weeks containing at least `perWeek` runs.
+ *  Readiness gates run off this, not off weeks-until-race: the calendar has
+ *  no idea whether the training actually happened. */
+export function runConsistencyWeeks(workouts: Record<string, any[]>,
+                                    today: string, perWeek = 2, maxWeeks = 26) {
+  let streak = 0;
+  for (let w = 0; w < maxWeeks; w++) {
+    const end = shift(today, -7 * w), start = shift(today, -7 * (w + 1));
+    let n = 0;
+    for (const [day, xs] of Object.entries(workouts)) {
+      if (day < start || day >= end) continue;
+      n += xs.filter((x) => x.sport_name === "running").length;
+    }
+    if (n >= perWeek) streak++;
+    else break;
+  }
+  return streak;
+}
+
+/** What the Ruut readiness criteria permit, given measured consistency. */
+export function readiness(weeks: number) {
+  return {
+    weeks,
+    long_runs: weeks >= 4,      // 3-4 weeks consistent
+    tempo: weeks >= 10,         // 2-3 months
+    intervals: weeks >= 20,     // 4-6 months
+  };
+}
+
 /* ------------------------------------------------------------------- plan */
 
 export function racePlan(raceDate: string, today: string, recentLongMi: number,
@@ -180,10 +209,24 @@ export function racePlan(raceDate: string, today: string, recentLongMi: number,
   );
 
   const idx = Math.max(0, schedule.length - weeksOut - 1);
+
+  // The easy run has to grow too. A 25-minute midweek run cannot support a
+  // 110-minute long run -- the long run is meant to be 20-40% longer than the
+  // usual easy one, not three times it.
+  const weeksIn = idx;
+  const easyMinutes = Math.min(60, 25 + Math.floor(weeksIn / 3) * 5);
+  const rawLong = schedule[Math.min(idx, schedule.length - 1)];
+  // ~10 min/mi at easy effort, so cap the long run at 1.4x the easy run.
+  const capMi = Math.round((easyMinutes * 1.4) / 10 * 10) / 10;
+  const cappedLong = Math.min(rawLong, capMi);
+
   return {
+    easy_run_minutes: easyMinutes,
+    long_run_capped: cappedLong < rawLong,
+    long_run_uncapped_mi: rawLong,
     race_date: raceDate,
     weeks_out: weeksOut,
-    long_run_this_week_mi: schedule[Math.min(idx, schedule.length - 1)],
+    long_run_this_week_mi: cappedLong,
     schedule_all: schedule,
     week_index: idx,
     longest_ever_mi: longestEver,
@@ -381,11 +424,13 @@ export function protocolFlags(dist: ReturnType<typeof intensityDistribution>) {
         detail: `${(dist.threshold * 100).toFixed(1)}% in zone 3. That is the zone ` +
                 `that costs the most recovery for the least adaptation.` });
   }
-  flags.push({ severity: "medium", title: "Cadence is below the tibial-load threshold",
+  flags.push({ severity: "low", title: "Cadence is below the tibial-load threshold",
     detail: `Last measured ${CADENCE_TARGET.current} spm; target ` +
             `${CADENCE_TARGET.target_low}-${CADENCE_TARGET.target_high}. WHOOP does ` +
             `not report cadence, so this comes from your watch and has to be ` +
-            `entered by hand.` });
+            `entered by hand. Worth knowing, not worth chasing yet -- forcing ` +
+            `technique before running is consistent tends to create tension ` +
+            `rather than prevent injury.` });
   return flags;
 }
 
@@ -402,11 +447,16 @@ const ADDITIONS: Record<string, [string, string, string]> = {
     "Rear delts and scap control. Cheap insurance for the shoulder."],
   rest: ["Ab circuit", "10 min",
     "Core is 0.2 sets/wk. A rest day is where it fits."],
+  "long run": ["Mobility and isometric block", "15 min after the run",
+    "Ankle holds 2x45s, bent-knee calf holds 2x40s, hip bridge 3x30s, side " +
+    "plank 2x30s. Joint and tendon work -- the insurance for rising mileage, " +
+    "and it hits calves, core and shins at once."],
 };
 
 export function prescribe(sets: LoggedSet[], planned: string, level: string,
                           z2: number, longMi: number, opts: {
-                            hrvStreak?: number; basePhase?: boolean;
+                            hrvStreak?: number; intervalsReady?: boolean;
+                            easyMinutes?: number;
                           } = {}) {
   const items: string[] = [];
   let source: string | null = null;
@@ -432,8 +482,10 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
     }
   }
 
-  if (planned === "run" || (planned === "pull+run" && level === "green"))
-    items.push(`Easy run — ${level === "green" ? 25 : 20} min, under ${z2} bpm`);
+  if (planned === "run" || (planned === "pull+run" && level === "green")) {
+    const base = opts.easyMinutes ?? 25;
+    items.push(`Easy run — ${level === "green" ? base : Math.round(base * 0.8)} min, under ${z2} bpm`);
+  }
   if (planned === "long run") {
     const mi = level === "green" ? longMi : Math.round(longMi * 0.75 * 10) / 10;
     items.push(`Long run — ${mi} mi, under ${z2} bpm`);
@@ -443,7 +495,7 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
 
   // Strides: top-end work that costs almost nothing in recovery, which is how
   // the polarized model gets its hard fraction back without a new session.
-  if (opts.basePhase === false && level === "green" &&
+  if (opts.intervalsReady && level === "green" &&
       (planned === "run" || planned === "pull+run"))
     items.push("Strides — 6 x 20s fast, full recovery between");
 

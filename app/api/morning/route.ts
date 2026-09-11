@@ -16,6 +16,7 @@ import { renderEmail, sendEmail } from "@/lib/athlete/email";
 import {
   buildState, racePlan, weekTemplate, decide, prescribe,
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
+  runConsistencyWeeks, readiness,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
@@ -99,12 +100,16 @@ export async function GET(req: NextRequest) {
     const template = weekTemplate(cfg.lacrosse.days);
     const z2 = cfg.athlete.zone2_ceiling_bpm;
     const decision = decide(state, plan, template, tun, z2);
-    // Base phase is the first two thirds of the build: easy volume only.
-    // After that, strides go back in to arrest the VO2 max slide.
-    const basePhase = plan.weeks_out > 18;
+    // Readiness is measured, not scheduled: consecutive weeks with at least
+    // two runs. Adding a run type before the criteria are met is the fastest
+    // way to get hurt, and the calendar cannot tell whether the work happened.
+    const consistency = runConsistencyWeeks(state._workouts as any, state.date);
+    const ready = readiness(consistency);
     const session = prescribe(sets, decision.planned, decision.level, z2,
                               plan.long_run_this_week_mi,
-                              { hrvStreak: state.hrv_low_streak, basePhase });
+                              { hrvStreak: state.hrv_low_streak,
+                                intervalsReady: ready.intervals,
+                                easyMinutes: plan.easy_run_minutes });
     const dist = intensityDistribution(state._workouts as any, state.date);
     const { per_week, flags } = imbalances(sets, state.date);
     const warns = loadWarnings(sets, state.date, tun);
@@ -114,7 +119,7 @@ export async function GET(req: NextRequest) {
       decision, session, plan, week: template,
       volume_per_week: per_week,
       imbalances: [...flags, ...protocolFlags(dist)],
-      load_warnings: warns, intensity: dist,
+      load_warnings: warns, intensity: dist, readiness: ready,
       protocols: PROTOCOLS.map(({ id, title, source, confidence, reviewed }) =>
         ({ id, title, source, confidence, reviewed })),
       tunables: tun,
