@@ -371,8 +371,10 @@ export function protocolFlags(dist: ReturnType<typeof intensityDistribution>) {
         title: "Almost no hard work in the last 60 days",
         detail: `${dist.hard_minutes} min in zones 4-5 out of ${dist.total_minutes} ` +
                 `(${(dist.hard * 100).toFixed(1)}%). Polarized training is ~80% easy ` +
-                `AND ~20% hard, not all easy. VO2 max has fallen 57 to 52 over the ` +
-                `same window.` });
+                `AND ~20% hard, not all easy. Note this is argued from the training ` +
+                `distribution itself, not from the VO2 max estimate -- that number ` +
+                `tracks how hard recent runs were, on 2-3 runs a month, so it cannot ` +
+                `settle the question either way.` });
     if (dist.threshold > INTENSITY_TARGET.threshold_max)
       flags.push({ severity: "medium",
         title: "Too much time at threshold",

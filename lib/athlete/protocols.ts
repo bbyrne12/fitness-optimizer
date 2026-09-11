@@ -99,6 +99,34 @@ export const INTENSITY_TARGET = {
 
 export const CADENCE_TARGET = { current: 157, target_low: 165, target_high: 170 };
 
+/**
+ * Watch VO2 max estimates, and why this system does not trust them.
+ *
+ * The figures: 50-51 from Sep 2025 through Apr 2026 (Eastern, sea level),
+ * 53 in May, 57 in June, then 55 / 54 / 52 through September. The move to
+ * Denver was 17 May 2026 and the return 12 Aug 2026, both confirmed by the
+ * timezone offsets on the WHOOP records.
+ *
+ * Two things make the number unusable as a fitness signal here:
+ *   1. It is derived from the pace-to-heart-rate relationship on runs, and it
+ *      rose while runs averaged 158-160 bpm and fell once they moved to 128-132.
+ *      It is measuring run intensity, not aerobic capacity.
+ *   2. It is computed from two or three runs a month, 30-60 minutes in total.
+ *
+ * Altitude may contribute, but it does not fit cleanly: the decline began in
+ * July while still in Denver, with strain falling throughout the stay.
+ *
+ * Consequence: if intensity goes back in, this number will probably rise. That
+ * is not evidence the training worked. Judge the build on pace at a fixed heart
+ * rate on the long run instead.
+ */
+export const VO2MAX_CAVEAT = {
+  sea_level_baseline: [50, 51] as const,
+  altitude_peak: 57,
+  latest: 52,
+  trust_as_fitness_signal: false,
+};
+
 export function protocolById(id: string) {
   return PROTOCOLS.find((p) => p.id === id) ?? null;
 }
