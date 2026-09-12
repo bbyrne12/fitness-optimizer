@@ -27,6 +27,25 @@ function safeNumber(n: unknown, fallback = 0) {
   return Number.isFinite(x) ? x : fallback;
 }
 
+// PostgREST caps a response at 1000 rows, and the imported history is already
+// 974. Page through rather than silently losing the oldest sessions the first
+// time the log crosses that line.
+async function allSets(db: ReturnType<typeof admin>) {
+  const PAGE = 1000;
+  const out: Array<Record<string, unknown>> = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await db
+      .from("athlete_sets")
+      .select("id,day,exercise,weight,reps,sets")
+      .order("day", { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (error || !data?.length) break;
+    out.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return out;
+}
+
 export async function CalendarView() {
   const supabase = await createClient();
   const {
@@ -35,13 +54,12 @@ export async function CalendarView() {
 
   if (!user) return null;
 
-  const since = new Date();
-  since.setDate(since.getDate() - 90);
-
+  // No date window. The calendar pages back through years, and the whole
+  // history is ~1k sets -- small enough to hand over at once, and the only way
+  // January 2024 isn't a wall of empty boxes.
   const { data, error } = await supabase
     .from("workout_logs")
     .select("id, exercise_id, sets, reps, weight, logged_at, exercises(name, primary_muscle)")
-    .gte("logged_at", since.toISOString())
     .order("logged_at", { ascending: false });
 
   const rows = error ? [] : ((data ?? []) as unknown as LogJoinRow[]);
@@ -64,12 +82,8 @@ export async function CalendarView() {
   // exercise_id -- the name is the name. They are merged in here so one
   // calendar shows everything, however it was entered.
   const db = admin();
-  const sinceDay = since.toISOString().slice(0, 10);
-  const [{ data: pasted }, { data: prof }] = await Promise.all([
-    db.from("athlete_sets")
-      .select("id,day,exercise,weight,reps,sets")
-      .gte("day", sinceDay)
-      .order("day", { ascending: false }),
+  const [pasted, { data: prof }] = await Promise.all([
+    allSets(db),
     db.from("athlete_profile").select("config").eq("id", "singleton").single(),
   ]);
   const aliases = ((prof?.config ?? {}) as any).exercise_aliases ?? {};
@@ -91,8 +105,17 @@ export async function CalendarView() {
     });
   }
 
-  for (const r of pasted ?? []) {
+  // Both tables can describe the same lift -- a session pasted in and then also
+  // tapped into the picker. The engine settles that tie by letting the app
+  // entry win; the calendar has to show the same thing the engine counts, or
+  // the day reads as twice the work it was.
+  const appKeys = new Set(
+    rows.map((r) => `${dateKeyFromIso(r.logged_at)}|${(r.exercises?.name ?? "").trim().toLowerCase()}`),
+  );
+
+  for (const r of pasted) {
     const key = r.day as string;
+    if (appKeys.has(`${key}|${String(r.exercise).trim().toLowerCase()}`)) continue;
     if (!workoutsByDay[key]) workoutsByDay[key] = [];
     workoutsByDay[key].push({
       // "as:" marks the row as coming from athlete_sets, so deleting one
