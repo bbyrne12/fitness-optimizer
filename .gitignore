@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local manual trigger for the morning email (reads secrets from disk)
+runonce.mts
