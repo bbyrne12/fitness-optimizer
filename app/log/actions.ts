@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { admin } from "@/lib/athlete/supabase";
+import { isAthleteOwner } from "@/lib/athlete/owner";
 import { parseLog } from "@/lib/athlete/parse-log";
 import { resolveExercises, norm, type AliasMap } from "@/lib/athlete/resolve-exercises";
 
@@ -24,6 +25,9 @@ export async function saveLog(
   _prev: SaveResult | null,
   form: FormData,
 ): Promise<SaveResult> {
+  // Writes to one person's athlete_sets with the service role key.
+  if (!(await isAthleteOwner())) return { ok: false, message: "Not authorised." };
+
   const text = String(form.get("log") ?? "").trim();
   if (!text) return { ok: false, message: "Nothing pasted." };
 

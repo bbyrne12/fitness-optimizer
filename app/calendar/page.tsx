@@ -8,6 +8,7 @@
 import { Suspense } from "react";
 import { admin } from "@/lib/athlete/supabase";
 import { buildCalendar } from "@/lib/athlete/calendar";
+import { isAthleteOwner } from "@/lib/athlete/owner";
 
 export const metadata = { title: "Training calendar" };
 
@@ -39,6 +40,19 @@ export default function CalendarPage() {
 }
 
 async function CalendarBody() {
+  // Built from one person's profile and decisions, read with the service role
+  // key. Anyone else who is signed in gets nothing from it.
+  if (!(await isAthleteOwner())) {
+    return (
+      <main className="mx-auto max-w-3xl px-5 py-16">
+        <h1 className="text-xl font-semibold">Nothing to show</h1>
+        <p className="mt-2 text-sm text-zinc-400">
+          The training plan is only available to the athlete it was built for.
+        </p>
+      </main>
+    );
+  }
+
   const db = admin();
   const [{ data: prof }, { data: log }] = await Promise.all([
     db.from("athlete_profile").select("config").eq("id", "singleton").single(),

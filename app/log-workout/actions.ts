@@ -107,6 +107,10 @@ export async function deleteWorkoutLog(logId: string): Promise<{ error?: string 
 
   // Rows typed into the paste box live in athlete_sets and are marked "as:".
   if (logId.startsWith("as:")) {
+    // athlete_sets belongs to one person and is deleted with the service role
+    // key, which ignores RLS, so ownership is checked before anything else.
+    const { isAthleteOwner } = await import("@/lib/athlete/owner");
+    if (!(await isAthleteOwner())) return { error: "Not authorised" };
     const { admin } = await import("@/lib/athlete/supabase");
     const { error } = await admin()
       .from("athlete_sets").delete().eq("id", Number(logId.slice(3)));

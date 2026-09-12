@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { admin } from "@/lib/athlete/supabase";
+import { ATHLETE_OWNER_ID } from "@/lib/athlete/owner";
 
 import { CalendarGrid } from "./calendar-grid";
 
@@ -81,12 +82,19 @@ export async function CalendarView() {
   // Sessions typed into the paste box live in athlete_sets, which has no
   // exercise_id -- the name is the name. They are merged in here so one
   // calendar shows everything, however it was entered.
-  const db = admin();
-  const [pasted, { data: prof }] = await Promise.all([
-    allSets(db),
-    db.from("athlete_profile").select("config").eq("id", "singleton").single(),
-  ]);
-  const aliases = ((prof?.config ?? {}) as any).exercise_aliases ?? {};
+  // athlete_sets is one person's history, read with the service role key, so it
+  // is only merged in for that person. Everyone else sees their own logs only.
+  let pasted: Array<Record<string, unknown>> = [];
+  let aliases: Record<string, any> = {};
+  if (user.id === ATHLETE_OWNER_ID) {
+    const db = admin();
+    const [sets, { data: prof }] = await Promise.all([
+      allSets(db),
+      db.from("athlete_profile").select("config").eq("id", "singleton").single(),
+    ]);
+    pasted = sets;
+    aliases = ((prof?.config ?? {}) as any).exercise_aliases ?? {};
+  }
   const normName = (n: string) =>
     n.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 
