@@ -1,9 +1,9 @@
 /**
  * Parser for the Apple Notes workout log, ported from whoop-dashboard/parse_workouts.py.
  *
- * The point is that the format never has to change. This reads what he already
- * writes -- three years and 293 sessions of it -- rather than asking him to
- * adopt a new one:
+ * The point is that the format never has to change. This reads the shorthand
+ * people already type into a notes app rather than asking them to adopt a new
+ * one:
  *
  *   1/4:                       date header (year from a "Workouts 26" line)
  *   X4:                        block multiplier, applies until the next blank
@@ -13,10 +13,9 @@
  *   Seated rows: 7th from top  machine pin position, no numeric weight
  *   Calf raises: 50 x 40 (25)  parenthetical is a note, not a set
  *   Pushups: 25 x 3            bodyweight: reps x sets
- *   ... 130 x 12 ^             his own progression marker
+ *   ... 130 x 12 ^             a progression marker
  *
- * A line with no set count written means DEFAULT_SETS, which is his stated
- * convention.
+ * A line with no set count written means DEFAULT_SETS.
  */
 export const DEFAULT_SETS = 3;
 
@@ -32,7 +31,7 @@ export type ParsedSet = {
 
 // Forgiving on purpose: this gets typed one-handed on a phone after a
 // workout. 9/14, 9/14:, 9/14/26, 9-14, "Sept 14" and "September 14th" all
-// mean the same thing, and none of them should cost him a lost session.
+// mean the same thing, and none of them should cost a lost session.
 const DATE_RE = /^(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?:?\s*$/;
 const MONTHS = ["jan","feb","mar","apr","may","jun",
                 "jul","aug","sep","oct","nov","dec"];

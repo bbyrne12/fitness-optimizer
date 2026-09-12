@@ -1,12 +1,12 @@
 name: Athlete OS morning poll
 
 # Vercel's Hobby plan caps cron at once per day, which cannot hit "30 minutes
-# after you wake" when wake time swings 5:15 to 9:43. So the poll lives here
+# after you wake" when waking time varies by hours. So the poll lives here
 # instead -- free, every 30 minutes, and it only pings the route. All the work
 # (and the once-a-day guard) happens in Vercel.
 #
-# Times are UTC. 09:00-15:00 UTC covers 05:00-11:00 America/New_York during
-# daylight saving. In winter this shifts an hour; widen the range if it matters.
+# Times are UTC. Set the hour range to cover the athlete's mornings in their
+# own time zone; daylight saving shifts it by an hour twice a year.
 on:
   schedule:
     - cron: "*/30 9-16 * * *"

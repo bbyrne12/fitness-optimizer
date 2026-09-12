@@ -6,7 +6,8 @@
  * blocks, each with one job, each ending in a recovery week where volume drops
  * and mobility work rises.
  */
-import { racePlan, weekTemplate, mesocycle, readiness, type Slot } from "./decide";
+import { racePlan, weekTemplate, mesocycle, readiness, personalFrom,
+         type Slot, type Personal } from "./decide";
 
 export type CalendarDay = {
   date: string;
@@ -44,7 +45,8 @@ function monday(day: string) {
 
 /** Session detail for a slot, given where the plan is that week. */
 function detailFor(kind: string, longMi: number, easyMin: number, z2: number,
-                   recoveryWeek: boolean, unlocked: ReturnType<typeof readiness>) {
+                   recoveryWeek: boolean, unlocked: ReturnType<typeof readiness>,
+                   personal: Personal) {
   switch (kind) {
     case "long run":
       // longMi already carries the cutback: the ladder discounts recovery
@@ -57,14 +59,16 @@ function detailFor(kind: string, longMi: number, easyMin: number, z2: number,
       return `${recoveryWeek ? Math.round(easyMin * 0.75) : easyMin} min easy, under ${z2} bpm`
         + (kind === "pull+run" ? " + pull lift" : "");
     case "lacrosse":
-      return "6pm — the biggest session of the week";
+      return personal.lacrosseTime
+        ? `${personal.lacrosseTime} — the biggest session of the week`
+        : "The biggest session of the week";
     case "legs":
       return recoveryWeek ? "Lighter. Hold weights, add the mobility block."
                           : "Rotates: quad / hip-adductor / posterior";
     case "push":
-      return "Bench stays at 95 with pauses while the shoulder talks";
+      return personal.cues.push ?? "Upper body — the cheapest session of the week";
     case "pull":
-      return "Rows, and the vertical pull that has been missing";
+      return personal.cues.pull ?? "Rows and a vertical pull";
     case "tennis":
       return "About an hour. Costs a third of what a run costs";
     case "rest":
@@ -76,12 +80,13 @@ function detailFor(kind: string, longMi: number, easyMin: number, z2: number,
 
 export function buildCalendar(opts: {
   raceDate: string; today: string; recentLongMi: number; longestEver: number;
-  lacrosseDays: string[]; tennisDays?: string[];
+  lacrosseDays: string[]; tennisDays?: string[]; personal?: Personal;
   z2: number; consistencyWeeks: number;
 }): { weeks: CalendarWeek[]; unlocked: ReturnType<typeof readiness> } {
   const { raceDate, today, lacrosseDays, z2 } = opts;
   const plan = racePlan(raceDate, today, opts.recentLongMi, opts.longestEver);
-  const template = weekTemplate(lacrosseDays, opts.tennisDays ?? []);
+  const personal = opts.personal ?? personalFrom({});
+  const template = weekTemplate(lacrosseDays, opts.tennisDays ?? [], personal.lacrosseTime);
   const unlocked = readiness(opts.consistencyWeeks);
 
   const weeks: CalendarWeek[] = [];
@@ -111,7 +116,7 @@ export function buildCalendar(opts: {
       const [kind, note] = (template[dw] ?? ["rest", ""]) as Slot;
       return {
         date, dow: dw, kind, note,
-        detail: detailFor(kind, cappedLong, easyMin, z2, meso.recovery_week, unlocked),
+        detail: detailFor(kind, cappedLong, easyMin, z2, meso.recovery_week, unlocked, personal),
         today: date === today,
       };
     });

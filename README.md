@@ -122,5 +122,13 @@ The app runs on those two alone. The morning decision additionally needs
 `RESEND_API_KEY`, `EMAIL_TO` and `CRON_SECRET`. Apply the files in
 `db/migrations/` in order via the Supabase SQL editor.
 
+Everything specific to one athlete lives in the `athlete_profile` row, not in
+the code: race date, sport days and times, time zone, zone 2 ceiling, the
+owner's user id (`owner_user_id`), per-session cues, lifts to keep off
+automatic progression (`manual_lifts`), replacement "add today" exercises
+(`additions`), a measured cadence, and overrides for any tunable. The recovery
+costs in `DEFAULT_TUNABLES` were calibrated on one athlete's WHOOP history and
+are meant to be refit for anyone else.
+
 `GET /api/morning?dry=1` runs the whole pipeline, sends nothing, and returns the
 decision as JSON. That is the fastest way to see what the engine does.

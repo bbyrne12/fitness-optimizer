@@ -18,9 +18,9 @@ where exists (select 1 from cron.job where jobname = 'athlete-os-morning');
 
 select cron.schedule(
   'athlete-os-morning',
-  -- Every 20 minutes, 09:00-16:59 UTC = 05:00-12:59 America/New_York in DST.
-  -- His wake time swings 5:15 to 9:43 and recovery scores a median of 13
-  -- minutes later, so the window has to be wide and the interval short.
+  -- Every 20 minutes, 09:00-16:59 UTC. Set the hours to cover the athlete's
+  -- mornings in their own time zone. Waking time varies by hours and recovery
+  -- scores shortly after, so the window has to be wide and the interval short.
   '*/20 9-16 * * *',
   $job$
     select net.http_get(

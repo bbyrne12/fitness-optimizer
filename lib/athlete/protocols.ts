@@ -66,8 +66,7 @@ export const PROTOCOLS: Protocol[] = [
       "gains of roughly 5-15 ms over 4-6 weeks of practice.",
     applied:
       "HRV is the stated primary goal, and this is the cheapest lever available: " +
-      "10 minutes at 6 breaths/min. There are already 24 logged meditation " +
-      "sessions, so the habit exists -- it just needs a cadence.",
+      "10 minutes at 6 breaths/min, scheduled rather than occasional.",
     source: "https://www.sciencedirect.com/science/article/abs/pii/S0149763422002007",
     query: "voluntary slow breathing heart rate variability systematic review meta-analysis",
     reviewed: "2026-09-11",
@@ -80,8 +79,8 @@ export const PROTOCOLS: Protocol[] = [
       "Increasing cadence 5-10% reduces peak tibial acceleration and lower-leg " +
       "load at the same running speed. Runners below ~170 spm benefit most.",
     applied:
-      "Cadence sits at 153-160 spm and the shins flare on longer runs. Target is " +
-      "165-170. WHOOP's API returns no cadence at all, so this one has to come " +
+      "Target 165-170 spm, flagged only when a measured cadence below it is on " +
+      "the profile. WHOOP's API returns no cadence at all, so it has to come " +
       "from the watch and be entered by hand.",
     source: "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7892879/",
     query: "running cadence 5-10% increase tibial acceleration shin splints MTSS",
@@ -131,9 +130,8 @@ export const PROTOCOLS: Protocol[] = [
       "mobility 3 min. Framed as joint protection and tendon strength -- the " +
       "work that keeps injuries away once mileage increases.",
     applied:
-      "Hits three open flags at once: calves at 1.4 sets/wk, core at 0.2, and " +
-      "the shin history. Cheaper than adding a session, and it is the same " +
-      "tissue the 2024 ankle rehab block was protecting.",
+      "Addresses low calf volume, low core volume and shin load in one block, " +
+      "and it is cheaper than adding a session.",
     source: "Ruut Labs HRV course, topic 11.3 (foundation session)",
     query: "runner ankle isometric calf holds hip bridge injury prevention mileage",
     reviewed: "2026-09-11",
@@ -148,33 +146,25 @@ export const INTENSITY_TARGET = {
   hard_min: 0.08,       // zones 4-5; ~20% is the textbook figure, 8% a floor
 };
 
-export const CADENCE_TARGET = { current: 157, target_low: 165, target_high: 170 };
+export const CADENCE_TARGET = { target_low: 165, target_high: 170 };
 
 /**
  * Watch VO2 max estimates, and why this system does not trust them.
  *
- * The figures: 50-51 from Sep 2025 through Apr 2026 (Eastern, sea level),
- * 53 in May, 57 in June, then 55 / 54 / 52 through September. The move to
- * Denver was 17 May 2026 and the return 12 Aug 2026, both confirmed by the
- * timezone offsets on the WHOOP records.
+ * Two things can make the number unusable as a fitness signal:
+ *   1. It is derived from the pace-to-heart-rate relationship on runs, so it
+ *      rises when runs get harder and falls when they move to zone 2. It can
+ *      end up measuring run intensity, not aerobic capacity.
+ *   2. With only a few runs a month it is computed from very little data.
  *
- * Two things make the number unusable as a fitness signal here:
- *   1. It is derived from the pace-to-heart-rate relationship on runs, and it
- *      rose while runs averaged 158-160 bpm and fell once they moved to 128-132.
- *      It is measuring run intensity, not aerobic capacity.
- *   2. It is computed from two or three runs a month, 30-60 minutes in total.
- *
- * Altitude may contribute, but it does not fit cleanly: the decline began in
- * July while still in Denver, with strain falling throughout the stay.
+ * Altitude moves it too; a change of location shows up in the timezone offsets
+ * on the WHOOP records. Any one athlete's history belongs on their profile.
  *
  * Consequence: if intensity goes back in, this number will probably rise. That
  * is not evidence the training worked. Judge the build on pace at a fixed heart
  * rate on the long run instead.
  */
 export const VO2MAX_CAVEAT = {
-  sea_level_baseline: [50, 51] as const,
-  altitude_peak: 57,
-  latest: 52,
   trust_as_fitness_signal: false,
 };
 

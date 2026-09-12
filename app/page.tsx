@@ -166,9 +166,6 @@ export default function Home() {
           <span className="font-semibold tracking-tight text-zinc-400">
             Fitness Optimizer
           </span>
-          <span className="text-center">
-            Built for CS 2053 · Villanova University
-          </span>
           <span>2026</span>
         </div>
       </footer>

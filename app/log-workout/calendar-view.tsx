@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { admin } from "@/lib/athlete/supabase";
-import { ATHLETE_OWNER_ID } from "@/lib/athlete/owner";
+import { athleteOwnerId } from "@/lib/athlete/owner";
 
 import { CalendarGrid } from "./calendar-grid";
 
@@ -86,7 +86,7 @@ export async function CalendarView() {
   // is only merged in for that person. Everyone else sees their own logs only.
   let pasted: Array<Record<string, unknown>> = [];
   let aliases: Record<string, any> = {};
-  if (user.id === ATHLETE_OWNER_ID) {
+  if (user.id === (await athleteOwnerId())) {
     const db = admin();
     const [sets, { data: prof }] = await Promise.all([
       allSets(db),

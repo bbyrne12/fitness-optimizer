@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
+import { admin } from "./supabase";
 
 /**
  * The athlete_* tables hold one person's training data and are read and written
@@ -7,14 +8,21 @@ import { createClient } from "@/lib/supabase/server";
  * touches them has to check this first; being signed in is not enough, because
  * anyone can sign up.
  *
- * A user id is not a secret, so the default lives here. ATHLETE_USER_ID
- * overrides it without a code change.
+ * Who that person is lives on the profile (`owner_user_id`), not in code, so a
+ * different deployment only needs a different profile. ATHLETE_USER_ID
+ * overrides it. With neither set, nobody is the owner: this fails closed.
  */
-export const ATHLETE_OWNER_ID =
-  process.env.ATHLETE_USER_ID ?? "37158e70-b99b-47a2-b5d2-abc1170c0396";
+export async function athleteOwnerId(): Promise<string | null> {
+  if (process.env.ATHLETE_USER_ID) return process.env.ATHLETE_USER_ID;
+  const { data } = await admin()
+    .from("athlete_profile").select("config").eq("id", "singleton").maybeSingle();
+  const id = (data?.config as Record<string, unknown> | undefined)?.owner_user_id;
+  return typeof id === "string" && id ? id : null;
+}
 
 export async function isAthleteOwner(): Promise<boolean> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  return !!user && user.id === ATHLETE_OWNER_ID;
+  if (!user) return false;
+  return user.id === (await athleteOwnerId());
 }

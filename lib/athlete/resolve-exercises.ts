@@ -1,12 +1,12 @@
 /**
- * Turn whatever he typed into muscles the engine can count.
+ * Turn whatever was typed into muscles the engine can count.
  *
- * His vocabulary is personal -- "Inner thigh", "Bulgarians", "Forward shoulder
- * extreme slows" -- and the library's is formal -- "Barbell Full Squat". The
+ * Typed vocabulary is personal -- "Inner thigh", "Bulgarians" -- and the
+ * library's is formal -- "Barbell Full Squat". The
  * resolver bridges them in four steps, cheapest first:
  *
  *   1. Aliases already resolved once and remembered (stored on the profile).
- *   2. His own Notes vocabulary, which is already mapped by hand.
+ *   2. The seeded typed-log vocabulary in muscles.ts, mapped by hand.
  *   3. The exercise library, matched on a normalised name.
  *   4. Claude, for whatever is genuinely new -- once per name, ever.
  *
@@ -41,7 +41,7 @@ export async function resolveExercises(
   for (const raw of new Set(names.map(norm))) {
     if (!raw || map[raw]) continue;
 
-    // 2. his own vocabulary -- already hand-mapped, no lookup needed
+    // 2. seeded vocabulary -- already hand-mapped, no lookup needed
     if (canonical(raw)) {
       const ms = musclesFor(raw);
       const prim = ms.find(([, w]) => w === 1)?.[0];

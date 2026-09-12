@@ -34,7 +34,7 @@ export const DEFAULT_TUNABLES: Tunables = {
   // a day with a run or lacrosse): mean next-day residual -1.8, sd 15.6, so
   // se 5.9 -- statistically indistinguishable from free. Set at -3 rather than
   // -2 because the one high-strain session in the set (15.2) was followed by a
-  // 33-point drop, so the cost plainly scales with how hard he plays. Revisit
+  // 33-point drop, so the cost plainly scales with how hard the session is. Revisit
   // once there are a dozen sessions; this is the weakest-evidenced cost here.
   cost_tennis: -3.0,
   cost_legs_quad: -3.5,
@@ -46,6 +46,43 @@ export const DEFAULT_TUNABLES: Tunables = {
   default_sets: 3,
 };
 
+/**
+ * Everything specific to one athlete that the engine needs to word or shape a
+ * day: session cues, lifts to leave off auto-progression, replacement "add
+ * today" exercises, a sport's start time, a measured cadence. It lives in
+ * athlete_profile.config -- data, not code -- so the code stays neutral and a
+ * different athlete only needs a different profile.
+ */
+export type Personal = {
+  cues: Record<string, string>;
+  manualLifts: string[];
+  additions: Record<string, [string, string, string]>;
+  lacrosseTime: string | null;
+  cadenceSpm: number | null;
+};
+
+/** "18:00" -> "6pm", "18:30" -> "6:30pm". Anything unparseable passes through. */
+function clock(t: unknown): string | null {
+  if (typeof t !== "string" || !t) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t.trim());
+  if (!m) return t;
+  const h = Number(m[1]), min = m[2];
+  return `${h % 12 || 12}${min === "00" ? "" : ":" + min}${h < 12 ? "am" : "pm"}`;
+}
+
+export function personalFrom(cfg: Record<string, any>): Personal {
+  const additions: Record<string, [string, string, string]> = {};
+  for (const [kind, a] of Object.entries(cfg.additions ?? {}))
+    if (Array.isArray(a) && a.length === 3) additions[kind] = a as [string, string, string];
+  return {
+    cues: { ...(cfg.cues ?? {}) },
+    manualLifts: Array.isArray(cfg.manual_lifts) ? cfg.manual_lifts : [],
+    additions,
+    lacrosseTime: clock(cfg.lacrosse?.time),
+    cadenceSpm: typeof cfg.cadence_spm === "number" ? cfg.cadence_spm : null,
+  };
+}
+
 export type LoggedSet = {
   day: string;
   exercise: string;
@@ -55,13 +92,13 @@ export type LoggedSet = {
   pin: string | null;
   /** Set when the row came from the app's exercise library, which carries its
    *  own muscle data. Preferred over the name-based map, because a library
-   *  name ("Barbell Full Squat") is not in his Notes vocabulary. */
+   *  name ("Barbell Full Squat") is not in the typed-log vocabulary. */
   primary_muscle?: string | null;
   secondary_muscles?: string[] | null;
 };
 
 /** Muscles for a logged set: the library's own data when the row has it,
- *  otherwise the name map built from his Notes vocabulary. */
+ *  otherwise the name map built from the typed-log vocabulary. */
 export function musclesForSet(r: LoggedSet): [string, number][] {
   if (r.primary_muscle) {
     return [
@@ -215,7 +252,7 @@ export function racePlan(raceDate: string, today: string, achievedLongMi: number
   );
   // Anchored on what has actually been run in the last three weeks, not on a
   // position in a ladder written months ago. Recomputed every morning, so a
-  // missed fortnight moves the plan instead of leaving him chasing it.
+  // missed fortnight moves the plan instead of leaving the athlete chasing it.
   const start = Math.max(achievedLongMi, 3.0);
   const peak = 11.0;
   const build = Math.max(1, weeksOut - 3);
@@ -254,8 +291,8 @@ export function racePlan(raceDate: string, today: string, achievedLongMi: number
     Math.min(70, easyBase + Math.floor(weekIdx / 3) * 5);
   const ratio = (easyMin: number) => (easyMin >= 45 ? 1.8 : 1.4);
   // The ratio caps GROWTH, never the anchor. It should stop the long run
-  // running away from the easy run; it should not tell him to go backwards
-  // from a distance he has already covered.
+  // running away from the easy run; it should not prescribe going backwards
+  // from a distance already covered.
   const cap = (weekIdx: number) => {
     const e = easyMinutes(weekIdx);
     return Math.max(start, Math.round((e * ratio(e)) / 10 * 10) / 10);
@@ -313,16 +350,17 @@ export function mesocycle(consistencyWeeks: number, weeksOut: number) {
 export type Slot = [string, string];
 
 export function weekTemplate(lacrosseDays: string[],
-                             tennisDays: string[] = []): Record<string, Slot> {
+                             tennisDays: string[] = [],
+                             lacrosseTime: string | null = null): Record<string, Slot> {
   const t: Record<string, Slot> = {
     Sat: ["long run", "The long run. The session the race is built on."],
     Sun: ["rest", "Rest, or a walk."],
   };
   for (const d of lacrosseDays)
     if (d !== "Sat" && d !== "Sun")
-      t[d] = ["lacrosse", "Lacrosse 6pm. Biggest session of your week."];
+      t[d] = ["lacrosse", `Lacrosse${lacrosseTime ? " " + lacrosseTime : ""}. Biggest session of your week.`];
   // Tennis after lacrosse: where they collide lacrosse keeps the day, since it
-  // is the fixed commitment and tennis is the one he schedules himself.
+  // is the fixed commitment and tennis is the one scheduled around it.
   for (const d of tennisDays)
     if (d !== "Sat" && d !== "Sun" && !(d in t))
       t[d] = ["tennis", "Tennis. Cheap in recovery terms — play it properly."];
@@ -347,8 +385,8 @@ export function weekTemplate(lacrosseDays: string[],
   free.forEach((d, i) => { if (order[i]) t[d] = order[i]; });
 
   // A once-a-week fixture like tennis eats a weekday, and the lift that falls
-  // off the end is the last one in `order` -- the push day, which carries the
-  // post-surgery shoulder work. Dropping that silently is the worst outcome
+  // off the end is the last one in `order` -- the push day. Dropping a lift
+  // silently is the worst outcome
   // available, so an unplaced lift takes Sunday instead. Upper-body work is
   // the cheapest session there is (about 0.6 recovery points), which is why it
   // can sit the day after the long run without costing the week anything.
@@ -411,11 +449,13 @@ export function lastSessionOf(sets: LoggedSet[], kind: string) {
 
 /** More weight only when it's been earned: same top set 3 sessions, green day. */
 export function progression(sets: LoggedSet[], name: string, weight: number | null,
-                            level: string, stale = 3): number | null {
+                            level: string, stale = 3,
+                            manualLifts: string[] = []): number | null {
   if (level !== "green" || !weight) return null;
   const low = name.trim().toLowerCase();
-  if (["bench", "press", "shoulder", "lat raise"].some((k) => low.includes(k)))
-    return null; // shoulder lifts stay manual, post-labrum
+  // Lifts the athlete progresses by hand -- an injury, a rehab block -- are
+  // never bumped automatically. The list is profile data, not code.
+  if (manualLifts.some((k) => low.includes(k.toLowerCase()))) return null;
 
   const tops: Record<string, number> = {};
   for (const r of sets)
@@ -474,8 +514,8 @@ export function imbalances(sets: LoggedSet[], today: string, weeks = 8) {
     flags.push({ severity: "medium", title: "Core is essentially untrained",
       detail: `${per.abdominals ?? 0} sets/wk.` });
   if ((per.calves ?? 0) < 2)
-    flags.push({ severity: "medium", title: "Calf volume is low and your shins flare",
-      detail: `${per.calves ?? 0} sets/wk while running volume climbs.` });
+    flags.push({ severity: "medium", title: "Calf volume is low while running volume climbs",
+      detail: `${per.calves ?? 0} sets/wk. Calves and shins take the load as mileage rises.` });
   return { per_week: per, flags };
 }
 
@@ -504,7 +544,8 @@ export function intensityDistribution(workouts: Record<string, any[]>,
 }
 
 /** Flags that come from the research protocols rather than from volume. */
-export function protocolFlags(dist: ReturnType<typeof intensityDistribution>) {
+export function protocolFlags(dist: ReturnType<typeof intensityDistribution>,
+                              opts: { template?: Record<string, Slot>; cadenceSpm?: number | null } = {}) {
   const flags = [];
   if (dist) {
     if (dist.hard < INTENSITY_TARGET.hard_min)
@@ -522,13 +563,22 @@ export function protocolFlags(dist: ReturnType<typeof intensityDistribution>) {
         detail: `${(dist.threshold * 100).toFixed(1)}% in zone 3. That is the zone ` +
                 `that costs the most recovery for the least adaptation.` });
   }
-  flags.push({ severity: "medium", title: "One rest day a week, against an HRV goal",
-    detail: "The HRV-shaped week is 3-4 easy cardio days, at most one hard, and " +
-            "2-3 days of rest or active recovery. With lacrosse twice plus three " +
-            "lifts, this week has one. That is trainable, but it is not an " +
-            "HRV-maximising week -- worth knowing which you are choosing." });
+  // Counted from the actual week, so the flag only appears when it is true.
+  const restDays = opts.template
+    ? Object.values(opts.template).filter(([kind]) => kind === "rest").length
+    : null;
+  if (restDays !== null && restDays < 2)
+    flags.push({ severity: "medium",
+      title: `${restDays === 0 ? "No rest days" : "One rest day"} a week, against an HRV goal`,
+      detail: "The HRV-shaped week is 3-4 easy cardio days, at most one hard, and " +
+              `2-3 days of rest or active recovery. This week has ${restDays}. That is ` +
+              "trainable, but it is not an HRV-maximising week -- worth knowing " +
+              "which you are choosing." });
+  // WHOOP has no cadence, so the flag only exists once one has been entered.
+  const cadence = opts.cadenceSpm ?? null;
+  if (cadence !== null && cadence < CADENCE_TARGET.target_low)
   flags.push({ severity: "low", title: "Cadence is below the tibial-load threshold",
-    detail: `Last measured ${CADENCE_TARGET.current} spm; target ` +
+    detail: `Last measured ${cadence} spm; target ` +
             `${CADENCE_TARGET.target_low}-${CADENCE_TARGET.target_high}. WHOOP does ` +
             `not report cadence, so this comes from your watch and has to be ` +
             `entered by hand. Worth knowing, not worth chasing yet -- forcing ` +
@@ -539,22 +589,24 @@ export function protocolFlags(dist: ReturnType<typeof intensityDistribution>) {
 
 /* --------------------------------------------------------- prescription */
 
+/** One extra exercise per session type. These are neutral defaults; a profile
+ *  can replace any of them (`additions`) with loads and reasons drawn from that
+ *  athlete's own history. */
 const ADDITIONS: Record<string, [string, string, string]> = {
   legs: ["Calf raises", "3 x 25",
-    "Shins. Calves are 1.4 sets/wk while running volume climbs."],
-  "pull+run": ["Lat pulldowns", "3 x 12 @ 100",
-    "The vertical pull. You have not done one in 21 months."],
-  pull: ["Lat pulldowns", "3 x 12 @ 100",
-    "The vertical pull. You have not done one in 21 months."],
+    "Calves and shins take the load as running volume climbs."],
+  "pull+run": ["Lat pulldowns", "3 x 12",
+    "A vertical pull, to balance rows and curls."],
+  pull: ["Lat pulldowns", "3 x 12",
+    "A vertical pull, to balance rows and curls."],
   push: ["Face pulls", "3 x 12",
-    "Rear delts and scap control. Cheap insurance for the shoulder."],
-  // Tennis is lateral, stop-start and hard on the shins and ankles -- the two
-  // things his running build is most exposed to. Calf/ankle work on that day
-  // is the cheapest protection available.
+    "Rear delts and scapular control, to balance the pressing."],
+  // Lateral, stop-start sports load the shins and ankles, the tissue a running
+  // build is most exposed to. Calf and ankle work that day is cheap protection.
   tennis: ["Single leg calf raises", "3 x 15 each side",
-    "Lateral, stop-start load on the shins. Calves are 1.4 sets/wk."],
+    "Lateral, stop-start load on the calves and shins."],
   rest: ["Ab circuit", "10 min",
-    "Core is 0.2 sets/wk. A rest day is where it fits."],
+    "Core work fits best on a rest day."],
   legs2: ["Mobility and isometric block", "15 min",
     "Second of two weekly sessions. Ankle holds, calf holds, hip bridge, side " +
     "plank. Tendons take months to strengthen; this is the quiet foundation."],
@@ -567,8 +619,9 @@ const ADDITIONS: Record<string, [string, string, string]> = {
 export function prescribe(sets: LoggedSet[], planned: string, level: string,
                           z2: number, longMi: number, opts: {
                             hrvStreak?: number; intervalsReady?: boolean;
-                            easyMinutes?: number;
+                            easyMinutes?: number; personal?: Personal;
                           } = {}) {
+  const personal = opts.personal ?? personalFrom({});
   const items: string[] = [];
   let source: string | null = null;
 
@@ -587,7 +640,7 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
     source = day;
     for (const e of exercises) {
       const load = e.weight ? `${e.weight}` : e.pin ?? "bodyweight";
-      const bump = progression(sets, e.exercise, e.weight, level);
+      const bump = progression(sets, e.exercise, e.weight, level, 3, personal.manualLifts);
       items.push(`${e.exercise} — ${e.sets} x ${e.reps ?? "–"} @ ${load}` +
                  (bump ? `  ↑ go to ${bump}` : ""));
     }
@@ -602,7 +655,7 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
     items.push(`Long run — ${mi} mi, under ${z2} bpm`);
   }
   if (planned === "lacrosse")
-    items.push("Lacrosse — 6pm. That is the whole session.");
+    items.push(`Lacrosse${personal.lacrosseTime ? " — " + personal.lacrosseTime : ""}. That is the whole session.`);
   if (planned === "tennis")
     items.push("Tennis — that is the session. Around an hour.");
 
@@ -612,7 +665,7 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
       (planned === "run" || planned === "pull+run"))
     items.push("Strides — 6 x 20s fast, full recovery between");
 
-  let add = ADDITIONS[planned];
+  let add = personal.additions[planned] ?? ADDITIONS[planned];
   // HRV is the stated primary goal, so when it is the thing that is off, the
   // breathing protocol outranks whatever else was scheduled for today.
   if ((opts.hrvStreak ?? 0) >= 2)
@@ -634,7 +687,8 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
 
 export function decide(state: ReturnType<typeof buildState>,
                        plan: ReturnType<typeof racePlan>,
-                       template: Record<string, Slot>, tun: Tunables, z2: number) {
+                       template: Record<string, Slot>, tun: Tunables, z2: number,
+                       personal: Personal = personalFrom({})) {
   const rec = state.recovery;
   const [planned, why] = template[state.dow];
   let level = rec >= tun.recovery_green ? "green"
@@ -701,7 +755,7 @@ export function decide(state: ReturnType<typeof buildState>,
     detail = `Costs roughly ${Math.abs(tun.cost_tennis).toFixed(0)} recovery points — `
       + `a third of a run. No lift today; the lateral work is enough.`;
     if (tomorrowIsLongRun)
-      detail += " Long run tomorrow, so stay off the hard lateral scrambling late in the session — that is what lights the shins up.";
+      detail += " Long run tomorrow, so stay off the hard lateral scrambling late in the session — that is the most shin-loading part of it.";
   } else if (planned === "long run") {
     let mi = level === "green" ? longMi : Math.round(longMi * 0.75 * 10) / 10;
     if (overCap) mi = Math.round(mi * 0.85 * 10) / 10;
@@ -709,7 +763,7 @@ export function decide(state: ReturnType<typeof buildState>,
     detail = `Stay under ${z2} bpm the whole way. Week ${plan.weeks_out} out; this is the session the race is built on.`;
   } else if ((planned === "pull+run" || planned === "run") && overCap && level !== "green") {
     call = planned === "pull+run" ? "Pull lift only." : "Rest the legs today.";
-    detail = `You are already at this week's running cap (${tw} min vs ${lw} last week). Shins flare when volume jumps; the build holds.`;
+    detail = `You are already at this week's running cap (${tw} min vs ${lw} last week). Sudden volume jumps are where running injuries come from; the build holds.`;
   } else if (planned === "pull+run" && level !== "green") {
     call = "Pull lift only. Skip the run.";
     detail = `Amber, so the run goes. The lift costs about ${Math.abs(tun.cost_lift_upper).toFixed(1)} recovery points; the run costs ${Math.abs(tun.cost_running).toFixed(0)}.`;
@@ -724,7 +778,7 @@ export function decide(state: ReturnType<typeof buildState>,
       : "Amber recovery. Same session, no load increase.";
   } else {
     call = level === "green" ? "Push lift." : "Push lift — hold at current weights.";
-    detail = "Bench stays at 95 with pauses until the shoulder says otherwise.";
+    detail = personal.cues.push ?? "Upper body only — the cheapest session of the week.";
   }
 
   return { level, call, detail, planned, why_today: why, reasons,

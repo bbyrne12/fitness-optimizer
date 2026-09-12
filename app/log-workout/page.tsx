@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 
 import { CalendarView } from "./calendar-view";
 import { PasteLog } from "@/components/paste-log";
-import { ATHLETE_OWNER_ID } from "@/lib/athlete/owner";
+import { athleteOwnerId } from "@/lib/athlete/owner";
 
 function JournalSkeleton() {
   return (
@@ -30,10 +30,11 @@ async function JournalContent() {
   if (error || !user) redirect("/auth/login");
 
   // The paste box writes to the owner's athlete_sets, so only the owner gets it.
+  const isOwner = user.id === (await athleteOwnerId());
   return (
     <>
       <CalendarView />
-      {user.id === ATHLETE_OWNER_ID && (
+      {isOwner && (
         <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
           <PasteLog compact />
         </section>

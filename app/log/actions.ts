@@ -17,7 +17,7 @@ export type SaveResult = {
 };
 
 /**
- * Paste in whatever is in Notes; this reads it in his own format and writes it
+ * Paste in whatever is in Notes; this reads the typed format and writes it
  * to Supabase. Re-pasting the same days replaces them rather than duplicating,
  * so pasting the whole month again is safe.
  */
@@ -32,9 +32,14 @@ export async function saveLog(
   if (!text) return { ok: false, message: "Nothing pasted." };
 
   const year = Number(form.get("year")) || new Date().getFullYear();
-  // Local "today" (America/New_York), so a session typed at 9pm does not land
-  // on tomorrow's date.
-  const today = new Date(Date.now() - 240 * 60_000).toISOString().slice(0, 10);
+  // The athlete's local "today", so a session typed at 9pm does not land on
+  // tomorrow's date. The UTC offset is profile data.
+  const db = admin();
+  const { data: prof } = await db
+    .from("athlete_profile").select("config").eq("id", "singleton").single();
+  const cfg = (prof?.config ?? {}) as Record<string, any>;
+  const today = new Date(Date.now() + (cfg.utc_offset_minutes ?? 0) * 60_000)
+    .toISOString().slice(0, 10);
   const { sets, unparsed, dated } = parseLog(text, year, today);
 
   if (!sets.length) {
@@ -47,7 +52,6 @@ export async function saveLog(
   }
 
   const days = [...new Set(sets.map((s) => s.day))].sort();
-  const db = admin();
 
   // Replace the pasted days outright: pasting a corrected day should fix it,
   // not add a second copy of it.
@@ -56,9 +60,6 @@ export async function saveLog(
 
   // Work out what the typed names mean before saving, so anything unmatched
   // can be shown now rather than quietly counting toward nothing.
-  const { data: prof } = await db
-    .from("athlete_profile").select("config").eq("id", "singleton").single();
-  const cfg = (prof?.config ?? {}) as Record<string, any>;
   const aliases = (cfg.exercise_aliases ?? {}) as AliasMap;
 
   const { map, added } = await resolveExercises(

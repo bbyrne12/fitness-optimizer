@@ -1,10 +1,10 @@
 /**
  * GET /api/morning
  *
- * The poller hits this every 30 minutes between 5am and 11am. It sends at most
- * one email a day, and only once WHOOP has actually scored today's recovery --
- * which lands a median of 13 minutes after he wakes, and his wake time swings
- * 5:15 to 9:43. A fixed alarm would be hours late most mornings.
+ * A scheduler polls this through the morning. It sends at most one email a
+ * day, and only once WHOOP has actually scored today's recovery -- which lands
+ * shortly after waking, and waking time varies by hours from day to day. A
+ * fixed alarm would be hours late most mornings.
  *
  * ?dry=1   run everything, send nothing, return the decision
  * ?force=1 send even if today has already been emailed
@@ -16,7 +16,7 @@ import { renderEmail, sendEmail } from "@/lib/athlete/email";
 import {
   buildState, racePlan, weekTemplate, decide, prescribe,
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
-  runConsistencyWeeks, readiness, mesocycle,
+  runConsistencyWeeks, readiness, mesocycle, personalFrom,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
@@ -53,9 +53,8 @@ export async function GET(req: NextRequest) {
         { status: 500 });
     }
 
-    // Two sources, because there are two ways he logs: the Notes history
-    // imported into athlete_sets, and the app's own calendar logger writing
-    // workout_logs. The calendar logger is the one he actually uses now.
+    // Two sources, because there are two ways to log: pasted text in
+    // athlete_sets, and the app's own calendar logger writing workout_logs.
     const [{ data: prof }, { data: setRows }, { data: appRows }] = await Promise.all([
       db.from("athlete_profile").select("config").eq("id", "singleton").single(),
       db.from("athlete_sets").select("day,exercise,weight,reps,sets,pin"),
@@ -112,7 +111,7 @@ export async function GET(req: NextRequest) {
 
     // Has today's recovery actually landed? If not, say so and wait.
     const todayLocal = new Date(
-      Date.now() + (cfg.utc_offset_minutes ?? -240) * 60_000,
+      Date.now() + (cfg.utc_offset_minutes ?? 0) * 60_000,
     ).toISOString().slice(0, 10);
     if (state.date !== todayLocal) {
       return NextResponse.json({
@@ -129,7 +128,7 @@ export async function GET(req: NextRequest) {
 
     // Longest run in the last three weeks: the anchor for the whole ladder.
     // Three weeks rather than sixty days so a good run two months ago stops
-    // propping up a plan he is no longer training for.
+    // propping up a plan that is no longer being trained for.
     let recentLong = 2.5;
     for (const [day, xs] of Object.entries(state._workouts)) {
       if (day <= new Date(Date.now() - 21 * 864e5).toISOString().slice(0, 10)) continue;
@@ -140,9 +139,11 @@ export async function GET(req: NextRequest) {
 
     const plan = racePlan(cfg.race.date, state.date, recentLong,
                           cfg.race.longest_run_ever_mi);
-    const template = weekTemplate(cfg.lacrosse.days, cfg.tennis?.days ?? []);
+    const personal = personalFrom(cfg);
+    const template = weekTemplate(cfg.lacrosse?.days ?? [], cfg.tennis?.days ?? [],
+                                  personal.lacrosseTime);
     const z2 = cfg.athlete.zone2_ceiling_bpm;
-    const decision = decide(state, plan, template, tun, z2);
+    const decision = decide(state, plan, template, tun, z2, personal);
     // Readiness is measured, not scheduled: consecutive weeks with at least
     // two runs. Adding a run type before the criteria are met is the fastest
     // way to get hurt, and the calendar cannot tell whether the work happened.
@@ -152,7 +153,7 @@ export async function GET(req: NextRequest) {
                               plan.long_run_this_week_mi,
                               { hrvStreak: state.hrv_low_streak,
                                 intervalsReady: ready.intervals,
-                                easyMinutes: plan.easy_run_minutes });
+                                easyMinutes: plan.easy_run_minutes, personal });
     const dist = intensityDistribution(state._workouts as any, state.date);
     // Phase follows weeks actually trained, not weeks elapsed.
     const meso = mesocycle(consistency, plan.weeks_out);
@@ -163,7 +164,7 @@ export async function GET(req: NextRequest) {
       state: { ...state, _workouts: undefined },
       decision, session, plan, week: template,
       volume_per_week: per_week,
-      imbalances: [...flags, ...protocolFlags(dist)],
+      imbalances: [...flags, ...protocolFlags(dist, { template, cadenceSpm: personal.cadenceSpm })],
       load_warnings: warns, intensity: dist,
       sources: { notes: fromNotes.length, app: fromApp.length, used: sets.length }, readiness: ready, meso,
       protocols: PROTOCOLS.map(({ id, title, source, confidence, reviewed }) =>

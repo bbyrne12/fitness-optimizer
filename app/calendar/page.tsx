@@ -8,6 +8,7 @@
 import { Suspense } from "react";
 import { admin } from "@/lib/athlete/supabase";
 import { buildCalendar } from "@/lib/athlete/calendar";
+import { personalFrom } from "@/lib/athlete/decide";
 import { isAthleteOwner } from "@/lib/athlete/owner";
 
 export const metadata = { title: "Training calendar" };
@@ -82,6 +83,7 @@ async function CalendarBody() {
     longestEver: cfg.race.longest_run_ever_mi,
     lacrosseDays: cfg.lacrosse.days,
     tennisDays: (cfg as any).tennis?.days ?? [],
+    personal: personalFrom(cfg),
     z2: cfg.athlete.zone2_ceiling_bpm,
     consistencyWeeks: decision?.readiness?.weeks ?? 0,
   });
