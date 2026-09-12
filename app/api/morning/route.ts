@@ -53,18 +53,48 @@ export async function GET(req: NextRequest) {
         { status: 500 });
     }
 
-    const [{ data: prof }, { data: setRows }] = await Promise.all([
+    // Two sources, because there are two ways he logs: the Notes history
+    // imported into athlete_sets, and the app's own calendar logger writing
+    // workout_logs. The calendar logger is the one he actually uses now.
+    const [{ data: prof }, { data: setRows }, { data: appRows }] = await Promise.all([
       db.from("athlete_profile").select("config").eq("id", "singleton").single(),
       db.from("athlete_sets").select("day,exercise,weight,reps,sets,pin"),
+      db.from("workout_logs")
+        .select("sets,reps,weight,logged_at,exercises(name,primary_muscle,secondary_muscles)"),
     ]);
     if (!prof) throw new Error("athlete_profile is empty -- push the config first");
 
     const cfg = prof.config as Record<string, any>;
     const tun: Tunables = { ...DEFAULT_TUNABLES, ...(cfg.tunables ?? {}) };
-    const sets = (setRows ?? []).map((r): LoggedSet => ({
+    const fromNotes = (setRows ?? []).map((r): LoggedSet => ({
       day: r.day, exercise: r.exercise, weight: r.weight,
       reps: r.reps, sets: r.sets, pin: r.pin,
     }));
+
+    const fromApp = (appRows ?? []).flatMap((r: any): LoggedSet[] => {
+      const ex = Array.isArray(r.exercises) ? r.exercises[0] : r.exercises;
+      if (!ex?.name || !r.logged_at) return [];
+      return [{
+        day: String(r.logged_at).slice(0, 10),
+        exercise: ex.name,
+        weight: r.weight ?? null,
+        reps: r.reps ?? null,
+        sets: r.sets ?? 1,
+        pin: null,
+        primary_muscle: ex.primary_muscle ?? null,
+        secondary_muscles: ex.secondary_muscles ?? null,
+      }];
+    });
+
+    // Where both sources describe the same lift on the same day, the app entry
+    // wins: it is the deliberate, structured one.
+    const appKeys = new Set(
+      fromApp.map((r) => `${r.day}|${r.exercise.trim().toLowerCase()}`));
+    const sets: LoggedSet[] = [
+      ...fromNotes.filter(
+        (r) => !appKeys.has(`${r.day}|${r.exercise.trim().toLowerCase()}`)),
+      ...fromApp,
+    ];
 
     const w = await pull(await accessToken());
     const state = buildState(w);
@@ -123,7 +153,8 @@ export async function GET(req: NextRequest) {
       decision, session, plan, week: template,
       volume_per_week: per_week,
       imbalances: [...flags, ...protocolFlags(dist)],
-      load_warnings: warns, intensity: dist, readiness: ready, meso,
+      load_warnings: warns, intensity: dist,
+      sources: { notes: fromNotes.length, app: fromApp.length, used: sets.length }, readiness: ready, meso,
       protocols: PROTOCOLS.map(({ id, title, source, confidence, reviewed }) =>
         ({ id, title, source, confidence, reviewed })),
       tunables: tun,

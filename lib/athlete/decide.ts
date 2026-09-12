@@ -45,7 +45,25 @@ export type LoggedSet = {
   reps: number | null;
   sets: number;
   pin: string | null;
+  /** Set when the row came from the app's exercise library, which carries its
+   *  own muscle data. Preferred over the name-based map, because a library
+   *  name ("Barbell Full Squat") is not in his Notes vocabulary. */
+  primary_muscle?: string | null;
+  secondary_muscles?: string[] | null;
 };
+
+/** Muscles for a logged set: the library's own data when the row has it,
+ *  otherwise the name map built from his Notes vocabulary. */
+export function musclesForSet(r: LoggedSet): [string, number][] {
+  if (r.primary_muscle) {
+    return [
+      [r.primary_muscle.toLowerCase(), 1.0] as [string, number],
+      ...(r.secondary_muscles ?? []).map(
+        (m) => [m.toLowerCase(), 0.5] as [string, number]),
+    ];
+  }
+  return musclesFor(r.exercise);
+}
 
 type Rec = Record<string, any>;
 
@@ -335,7 +353,7 @@ export function classifyDay(vol: Record<string, number>): string {
 function volumeByDay(sets: LoggedSet[]) {
   const byDay: Record<string, Record<string, number>> = {};
   for (const r of sets) {
-    for (const [m, w] of musclesFor(r.exercise)) {
+    for (const [m, w] of musclesForSet(r)) {
       const b = bucket(m);
       (byDay[r.day] ??= {})[b] = (byDay[r.day][b] ?? 0) + r.sets * w;
     }
@@ -409,7 +427,7 @@ export function imbalances(sets: LoggedSet[], today: string, weeks = 8) {
   const vol: Record<string, number> = {};
   for (const r of sets) {
     if (r.day < cut) continue;
-    for (const [m, w] of musclesFor(r.exercise)) {
+    for (const [m, w] of musclesForSet(r)) {
       const b = bucket(m);
       vol[b] = (vol[b] ?? 0) + r.sets * w;
     }
