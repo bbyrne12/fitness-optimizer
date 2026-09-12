@@ -67,6 +67,7 @@ async function CalendarBody() {
     recentLongMi: decision?.plan?.long_run_uncapped_mi ?? 3,
     longestEver: cfg.race.longest_run_ever_mi,
     lacrosseDays: cfg.lacrosse.days,
+    tennisDays: (cfg as any).tennis?.days ?? [],
     z2: cfg.athlete.zone2_ceiling_bpm,
     consistencyWeeks: decision?.readiness?.weeks ?? 0,
   });

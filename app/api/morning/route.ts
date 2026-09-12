@@ -140,7 +140,7 @@ export async function GET(req: NextRequest) {
 
     const plan = racePlan(cfg.race.date, state.date, recentLong,
                           cfg.race.longest_run_ever_mi);
-    const template = weekTemplate(cfg.lacrosse.days);
+    const template = weekTemplate(cfg.lacrosse.days, cfg.tennis?.days ?? []);
     const z2 = cfg.athlete.zone2_ceiling_bpm;
     const decision = decide(state, plan, template, tun, z2);
     // Readiness is measured, not scheduled: consecutive weeks with at least

@@ -65,6 +65,8 @@ function detailFor(kind: string, longMi: number, easyMin: number, z2: number,
       return "Bench stays at 95 with pauses while the shoulder talks";
     case "pull":
       return "Rows, and the vertical pull that has been missing";
+    case "tennis":
+      return "About an hour. Costs a third of what a run costs";
     case "rest":
       return "Rest or a slow 15-minute walk";
     default:
@@ -74,11 +76,12 @@ function detailFor(kind: string, longMi: number, easyMin: number, z2: number,
 
 export function buildCalendar(opts: {
   raceDate: string; today: string; recentLongMi: number; longestEver: number;
-  lacrosseDays: string[]; z2: number; consistencyWeeks: number;
+  lacrosseDays: string[]; tennisDays?: string[];
+  z2: number; consistencyWeeks: number;
 }): { weeks: CalendarWeek[]; unlocked: ReturnType<typeof readiness> } {
   const { raceDate, today, lacrosseDays, z2 } = opts;
   const plan = racePlan(raceDate, today, opts.recentLongMi, opts.longestEver);
-  const template = weekTemplate(lacrosseDays);
+  const template = weekTemplate(lacrosseDays, opts.tennisDays ?? []);
   const unlocked = readiness(opts.consistencyWeeks);
 
   const weeks: CalendarWeek[] = [];

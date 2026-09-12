@@ -15,6 +15,7 @@ export type Tunables = {
   recovery_red: number;
   cost_running: number;
   cost_lacrosse: number;
+  cost_tennis: number;
   cost_legs_quad: number;
   cost_lift_upper: number;
   sleep_debt_downgrade: number;
@@ -29,6 +30,13 @@ export const DEFAULT_TUNABLES: Tunables = {
   recovery_red: 34,
   cost_running: -11.0,
   cost_lacrosse: -4.1,
+  // Seven clean racquet days (tennis, paddle, pickleball, none of them sharing
+  // a day with a run or lacrosse): mean next-day residual -1.8, sd 15.6, so
+  // se 5.9 -- statistically indistinguishable from free. Set at -3 rather than
+  // -2 because the one high-strain session in the set (15.2) was followed by a
+  // 33-point drop, so the cost plainly scales with how hard he plays. Revisit
+  // once there are a dozen sessions; this is the weakest-evidenced cost here.
+  cost_tennis: -3.0,
   cost_legs_quad: -3.5,
   cost_lift_upper: -0.6,
   sleep_debt_downgrade: 2.0,
@@ -304,7 +312,8 @@ export function mesocycle(consistencyWeeks: number, weeksOut: number) {
 
 export type Slot = [string, string];
 
-export function weekTemplate(lacrosseDays: string[]): Record<string, Slot> {
+export function weekTemplate(lacrosseDays: string[],
+                             tennisDays: string[] = []): Record<string, Slot> {
   const t: Record<string, Slot> = {
     Sat: ["long run", "The long run. The session the race is built on."],
     Sun: ["rest", "Rest, or a walk."],
@@ -312,6 +321,11 @@ export function weekTemplate(lacrosseDays: string[]): Record<string, Slot> {
   for (const d of lacrosseDays)
     if (d !== "Sat" && d !== "Sun")
       t[d] = ["lacrosse", "Lacrosse 6pm. Biggest session of your week."];
+  // Tennis after lacrosse: where they collide lacrosse keeps the day, since it
+  // is the fixed commitment and tennis is the one he schedules himself.
+  for (const d of tennisDays)
+    if (d !== "Sat" && d !== "Sun" && !(d in t))
+      t[d] = ["tennis", "Tennis. Cheap in recovery terms — play it properly."];
 
   const free = ["Mon", "Tue", "Wed", "Thu", "Fri"].filter((d) => !(d in t));
   const lifts: Slot[] = [
@@ -331,6 +345,21 @@ export function weekTemplate(lacrosseDays: string[]): Record<string, Slot> {
     );
   }
   free.forEach((d, i) => { if (order[i]) t[d] = order[i]; });
+
+  // A once-a-week fixture like tennis eats a weekday, and the lift that falls
+  // off the end is the last one in `order` -- the push day, which carries the
+  // post-surgery shoulder work. Dropping that silently is the worst outcome
+  // available, so an unplaced lift takes Sunday instead. Upper-body work is
+  // the cheapest session there is (about 0.6 recovery points), which is why it
+  // can sit the day after the long run without costing the week anything.
+  const placed = new Set(Object.values(t).map((slot) => slot[0]));
+  const spill = order.filter((slot) => !placed.has(slot[0]));
+  if (spill.length && t.Sun?.[0] === "rest") {
+    const [kind] = spill[spill.length - 1];
+    t.Sun = [kind, `${kind === "push" ? "Push" : "Lift"} day, moved to Sunday — `
+      + "the week is full and upper body is the cheapest session to put here."];
+  }
+
   for (const d of DOW) t[d] ??= ["rest", "Nothing scheduled."];
   return t;
 }
@@ -519,6 +548,11 @@ const ADDITIONS: Record<string, [string, string, string]> = {
     "The vertical pull. You have not done one in 21 months."],
   push: ["Face pulls", "3 x 12",
     "Rear delts and scap control. Cheap insurance for the shoulder."],
+  // Tennis is lateral, stop-start and hard on the shins and ankles -- the two
+  // things his running build is most exposed to. Calf/ankle work on that day
+  // is the cheapest protection available.
+  tennis: ["Single leg calf raises", "3 x 15 each side",
+    "Lateral, stop-start load on the shins. Calves are 1.4 sets/wk."],
   rest: ["Ab circuit", "10 min",
     "Core is 0.2 sets/wk. A rest day is where it fits."],
   legs2: ["Mobility and isometric block", "15 min",
@@ -569,6 +603,8 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   }
   if (planned === "lacrosse")
     items.push("Lacrosse — 6pm. That is the whole session.");
+  if (planned === "tennis")
+    items.push("Tennis — that is the session. Around an hour.");
 
   // Strides: top-end work that costs almost nothing in recovery, which is how
   // the polarized model gets its hard fraction back without a new session.
@@ -647,6 +683,8 @@ export function decide(state: ReturnType<typeof buildState>,
 
   let call: string, detail: string;
   const longMi = plan.long_run_this_week_mi;
+  const tomorrowIsLongRun =
+    template[DOW[(DOW.indexOf(state.dow as any) + 1) % 7]]?.[0] === "long run";
 
   if (level === "red") {
     call = planned === "rest" ? "Rest, as planned." : "Rest today.";
@@ -656,6 +694,14 @@ export function decide(state: ReturnType<typeof buildState>,
   } else if (planned === "lacrosse") {
     call = level === "green" ? "Lacrosse tonight." : "Lacrosse tonight — pace yourself.";
     detail = `Costs about ${Math.abs(tun.cost_lacrosse).toFixed(0)} recovery points, less than a hard run. No lift today.`;
+  } else if (planned === "tennis") {
+    call = level === "green" ? "Tennis today." : "Tennis today — keep it social.";
+    // The measured cost is about a third of a run's and well under lacrosse's,
+    // which is why it survives an amber morning when a run would not.
+    detail = `Costs roughly ${Math.abs(tun.cost_tennis).toFixed(0)} recovery points — `
+      + `a third of a run. No lift today; the lateral work is enough.`;
+    if (tomorrowIsLongRun)
+      detail += " Long run tomorrow, so stay off the hard lateral scrambling late in the session — that is what lights the shins up.";
   } else if (planned === "long run") {
     let mi = level === "green" ? longMi : Math.round(longMi * 0.75 * 10) / 10;
     if (overCap) mi = Math.round(mi * 0.85 * 10) / 10;
