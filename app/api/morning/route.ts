@@ -66,10 +66,21 @@ export async function GET(req: NextRequest) {
 
     const cfg = prof.config as Record<string, any>;
     const tun: Tunables = { ...DEFAULT_TUNABLES, ...(cfg.tunables ?? {}) };
-    const fromNotes = (setRows ?? []).map((r): LoggedSet => ({
-      day: r.day, exercise: r.exercise, weight: r.weight,
-      reps: r.reps, sets: r.sets, pin: r.pin,
-    }));
+    // Names typed by hand carry no muscle data of their own, so the alias map
+    // resolved at save time supplies it here.
+    const aliases = (cfg.exercise_aliases ?? {}) as Record<string, any>;
+    const alias = (name: string) =>
+      aliases[name.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim()];
+
+    const fromNotes = (setRows ?? []).map((r): LoggedSet => {
+      const a = alias(r.exercise);
+      return {
+        day: r.day, exercise: r.exercise, weight: r.weight,
+        reps: r.reps, sets: r.sets, pin: r.pin,
+        primary_muscle: a?.primary_muscle || null,
+        secondary_muscles: a?.secondary_muscles ?? null,
+      };
+    });
 
     const fromApp = (appRows ?? []).flatMap((r: any): LoggedSet[] => {
       const ex = Array.isArray(r.exercises) ? r.exercises[0] : r.exercises;

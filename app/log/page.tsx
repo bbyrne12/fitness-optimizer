@@ -79,6 +79,30 @@ export default function LogPage() {
               {result.days.join("  ·  ")}
             </p>
           )}
+          {result.matched && result.matched.length > 0 && (
+            <div className="mt-3 border-t border-zinc-800 pt-3">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+                Matched
+              </p>
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {result.matched.map((m) => (
+                  <li key={m.name} className="font-mono text-[11px]">
+                    <span className="text-zinc-300">{m.name}</span>
+                    <span className="text-zinc-600"> → </span>
+                    <span
+                      className={
+                        m.source === "unresolved" ? "text-red-400" : "text-lime-400"
+                      }
+                    >
+                      {m.muscle}
+                    </span>
+                    <span className="text-zinc-600"> ({m.source})</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {result.unparsed && result.unparsed.length > 0 && (
             <div className="mt-3 border-t border-zinc-800 pt-3">
               <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">

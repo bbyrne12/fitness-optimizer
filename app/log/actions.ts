@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { admin } from "@/lib/athlete/supabase";
 import { parseLog } from "@/lib/athlete/parse-log";
+import { resolveExercises, norm, type AliasMap } from "@/lib/athlete/resolve-exercises";
 
 export type SaveResult = {
   ok: boolean;
@@ -10,6 +11,8 @@ export type SaveResult = {
   days?: string[];
   sets?: number;
   unparsed?: string[];
+  /** What each new exercise name was matched to, and how. */
+  matched?: { name: string; muscle: string; source: string }[];
 };
 
 /**
@@ -47,6 +50,33 @@ export async function saveLog(
   const { error: delErr } = await db.from("athlete_sets").delete().in("day", days);
   if (delErr) return { ok: false, message: `Could not clear those days: ${delErr.message}` };
 
+  // Work out what the typed names mean before saving, so anything unmatched
+  // can be shown now rather than quietly counting toward nothing.
+  const { data: prof } = await db
+    .from("athlete_profile").select("config").eq("id", "singleton").single();
+  const cfg = (prof?.config ?? {}) as Record<string, any>;
+  const aliases = (cfg.exercise_aliases ?? {}) as AliasMap;
+
+  const { map, added } = await resolveExercises(
+    sets.map((s) => s.exercise), db, aliases);
+
+  if (Object.keys(added).length) {
+    await db.from("athlete_profile").upsert({
+      id: "singleton",
+      config: { ...cfg, exercise_aliases: map },
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  const matched = [...new Set(sets.map((s) => s.exercise))].map((name) => {
+    const r = map[norm(name)];
+    return {
+      name,
+      muscle: r?.primary_muscle || "no match",
+      source: r?.source ?? "unresolved",
+    };
+  });
+
   const { error: insErr } = await db.from("athlete_sets").insert(
     sets.map((s) => ({
       day: s.day, exercise: s.exercise, weight: s.weight,
@@ -64,5 +94,6 @@ export async function saveLog(
       (dated ? "" : ` No date written, so it was filed under today.`),
     days, sets: sets.length,
     unparsed: unparsed.slice(0, 8),
+    matched,
   };
 }
