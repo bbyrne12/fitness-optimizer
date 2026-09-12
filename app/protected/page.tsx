@@ -331,7 +331,7 @@ async function DashboardContent() {
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Card className="transition-colors hover:bg-accent">
-            <Link href="/log-workout" className="block">
+            <Link href="/log" className="block">
               <CardHeader className="space-y-1">
                 <div className="flex items-center gap-3">
                   <div className="rounded-md border bg-background p-2">
@@ -340,7 +340,7 @@ async function DashboardContent() {
                   <CardTitle className="text-lg">Log a Workout</CardTitle>
                 </div>
                 <CardDescription>
-                  Track today&apos;s session in seconds.
+                  Type it the way you write it. No pickers.
                 </CardDescription>
               </CardHeader>
             </Link>

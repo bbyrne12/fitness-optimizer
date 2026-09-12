@@ -13,7 +13,9 @@ const NAV_LINKS = [
   { href: "/protected", label: "Dashboard" },
   { href: "/plans", label: "My Plans" },
   { href: "/plan", label: "Generate Plan" },
-  { href: "/log-workout", label: "Log Workout" },
+  { href: "/log", label: "Log Workout" },
+  { href: "/calendar", label: "Calendar" },
+  { href: "/log-workout", label: "Exercise Picker" },
   { href: "/exercises", label: "Exercises" },
 ] as const;
 
