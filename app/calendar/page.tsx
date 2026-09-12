@@ -10,20 +10,26 @@ import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/server";
 import { buildCalendar } from "@/lib/athlete/calendar";
-import { personalFrom } from "@/lib/athlete/decide";
+import { activityCosts, personalFrom, planInputs } from "@/lib/athlete/decide";
 
 export const metadata = { title: "Training calendar" };
 
 const KIND_COLOR: Record<string, string> = {
   "long run": "bg-lime-400",
   run: "bg-sky-400",
-  "pull+run": "bg-sky-400",
-  lacrosse: "bg-amber-400",
-  tennis: "bg-orange-400",
   legs: "bg-zinc-500",
   push: "bg-zinc-500",
   pull: "bg-zinc-500",
+  upper: "bg-zinc-500",
+  "full body": "bg-zinc-500",
   rest: "bg-zinc-700",
+};
+
+// Activities are coloured by how hard they are, whatever the sport.
+const INTENSITY_COLOR: Record<string, string> = {
+  hard: "bg-amber-400",
+  moderate: "bg-orange-400",
+  easy: "bg-teal-400",
 };
 
 export default function CalendarPage() {
@@ -56,12 +62,12 @@ async function CalendarBody() {
   ]);
 
   const cfg = (prof?.config ?? null) as Record<string, any> | null;
-  if (!cfg?.race?.date) {
+  if (!cfg) {
     return (
       <main className="mx-auto max-w-3xl px-5 py-16">
         <h1 className="text-xl font-semibold">No training plan yet</h1>
         <p className="mt-2 text-sm text-zinc-400">
-          Set a race date and connect WHOOP, and the plan builds itself from there.
+          Answer the setup questions and connect WHOOP, and the plan builds itself from there.
         </p>
         <Link
           href="/athlete"
@@ -75,17 +81,18 @@ async function CalendarBody() {
   const decision = (log?.decision ?? null) as Record<string, any> | null;
   const today = decision?.state?.date ?? new Date().toISOString().slice(0, 10);
 
+  const inputs = planInputs(cfg);
+  const personal = personalFrom(cfg);
+  personal.activityCosts = activityCosts(
+    inputs.activities, cfg.whoop_summary?.sports ?? [], cfg.tunables ?? {});
   const { weeks, unlocked } = buildCalendar({
-    raceDate: cfg.race.date,
+    inputs,
     today,
     recentLongMi: decision?.plan?.long_run_uncapped_mi ?? 3,
-    longestEver: cfg.race.longest_run_ever_mi ?? 0,
-    lacrosseDays: cfg.lacrosse?.days ?? [],
-    tennisDays: (cfg as any).tennis?.days ?? [],
-    personal: personalFrom(cfg),
-    z2: cfg.athlete?.zone2_ceiling_bpm ?? 145,
     consistencyWeeks: decision?.readiness?.weeks ?? 0,
+    personal,
   });
+  const activityFor = (kind: string) => inputs.activities.find((a) => a.sport === kind);
 
   const current = weeks[0];
   const gates = [
@@ -102,11 +109,12 @@ async function CalendarBody() {
             Training calendar
           </p>
           <h1 className="mt-2 text-2xl font-semibold">
-            {weeks.length - 1} weeks to{" "}
-            {cfg.race.name ? `the ${String(cfg.race.name).toLowerCase()}` : "race day"}
+            {inputs.race
+              ? `${weeks.length - 1} weeks to the ${inputs.race.name.toLowerCase()}`
+              : `Your next ${weeks.length} weeks`}
           </h1>
           <p className="mt-1 text-sm text-zinc-400">
-            {cfg.race.date} · longest run ever {cfg.race.longest_run_ever_mi ?? 0} mi
+            {inputs.race ? `${inputs.race.date} · ` : ""}longest run ever {inputs.longestRunMi} mi
           </p>
         </div>
         <div className="rounded-md border border-zinc-800 bg-zinc-900 px-4 py-3">
@@ -189,14 +197,20 @@ async function CalendarBody() {
                 >
                   <div className="flex items-center gap-1.5">
                     <span
-                      className={`h-1.5 w-1.5 rounded-full ${KIND_COLOR[d.kind] ?? "bg-zinc-700"}`}
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        d.kind.endsWith("+run")
+                          ? "bg-sky-400"
+                          : KIND_COLOR[d.kind]
+                            ?? INTENSITY_COLOR[activityFor(d.kind)?.intensity ?? ""]
+                            ?? "bg-zinc-700"
+                      }`}
                     />
                     <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
                       {d.dow} {d.date.slice(8)}
                     </span>
                   </div>
                   <span className="text-[12px] font-medium leading-tight">
-                    {d.kind}
+                    {activityFor(d.kind)?.label.toLowerCase() ?? d.kind}
                   </span>
                   <span className="text-[11px] leading-snug text-zinc-400">
                     {d.detail}

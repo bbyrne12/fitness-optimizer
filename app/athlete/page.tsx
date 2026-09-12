@@ -1,23 +1,24 @@
 /**
- * /athlete -- one athlete's setup: their WHOOP connection and the profile the
- * morning decision is built from.
+ * /athlete -- one athlete's setup: their WHOOP connection, then the questions
+ * the plan is built from.
  */
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 
 import { AppNav } from "@/components/app-nav";
 import { createClient } from "@/lib/supabase/server";
+import { planInputs } from "@/lib/athlete/decide";
 import { connectionStatus } from "@/lib/athlete/whoop";
 
 import { disconnectWhoop } from "./actions";
-import { SetupForm, type SetupDefaults } from "./setup-form";
+import { SetupForm, type SetupDefaults, type SportSeen } from "./setup-form";
 
 export const metadata = { title: "Athlete setup" };
 
 const NOTICES: Record<string, { ok: boolean; text: string }> = {
   connected: {
     ok: true,
-    text: "WHOOP is connected. The first morning email goes out once WHOOP scores your next recovery.",
+    text: "WHOOP is connected. Your sports and what each one costs you are below; the first morning email goes out once WHOOP scores your next recovery.",
   },
   denied: { ok: false, text: "WHOOP access was not approved, so nothing was connected." },
   state: {
@@ -31,7 +32,7 @@ const NOTICES: Record<string, { ok: boolean; text: string }> = {
   unavailable: { ok: false, text: "WHOOP connections are not configured on this deployment yet." },
 };
 
-const ADVANCED_KEYS = ["cues", "additions", "manual_lifts", "tunables", "cadence_spm"];
+const ADVANCED_KEYS = ["cues", "additions", "tunables", "cadence_spm"];
 
 const primaryBtn =
   "inline-block rounded-md bg-lime-400 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-lime-300";
@@ -54,8 +55,8 @@ export default function AthletePage({ searchParams }: { searchParams: Search }) 
               Your morning decision
             </h1>
             <p className="text-sm leading-relaxed text-zinc-400">
-              Connect WHOOP and set a race. Every morning, once WHOOP scores your
-              recovery, you get one email: what to train today, and how hard.
+              Connect WHOOP and answer a few questions. Every morning, once WHOOP
+              scores your recovery, you get one email: what to train today, and how hard.
             </p>
           </header>
 
@@ -85,23 +86,40 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
     connectionStatus(user.id),
   ]);
   const cfg = (prof?.config ?? {}) as Record<string, any>;
+  const answered = Boolean(cfg.goals || cfg.race);
+  const inputs = planInputs(cfg);
   const notice = whoop ? NOTICES[whoop] : undefined;
+
+  const summary = (cfg.whoop_summary ?? {}) as Record<string, any>;
+  const sportsSeen: SportSeen[] = Array.isArray(summary.sports) ? summary.sports : [];
+  const maxHr = Number(summary.max_heart_rate);
+  const restingHr = Number(summary.resting_heart_rate);
+  // WHOOP's heart-rate zones run on heart-rate reserve; zone 2 tops out at 70% of it.
+  const zone2Suggestion = maxHr > 0 && restingHr > 0
+    ? Math.round(restingHr + 0.7 * (maxHr - restingHr))
+    : null;
 
   const advanced: Record<string, unknown> = {};
   for (const k of ADVANCED_KEYS) if (cfg[k] !== undefined) advanced[k] = cfg[k];
 
   const defaults: SetupDefaults = {
-    emailTo: cfg.email_to ?? "",
-    raceName: cfg.race?.name ?? "Half marathon",
-    raceDate: cfg.race?.date ?? "",
-    longestRunMi: cfg.race?.longest_run_ever_mi ?? "",
+    goal: answered ? inputs.goal : "",
+    raceDistance: inputs.race?.distance ?? "",
+    raceDate: inputs.race?.date ?? "",
+    raceName: cfg.goals?.race?.name ?? cfg.race?.name ?? "",
+    liftDays: inputs.liftDays,
+    runDays: inputs.runDays,
+    longRunDay: inputs.longRunDay,
+    activities: inputs.activities.map((a) => ({
+      sport: a.sport, label: a.label, days: a.days, time: a.time ?? "", intensity: a.intensity,
+    })),
     zone2: cfg.athlete?.zone2_ceiling_bpm ?? "",
-    lacrosseDays: cfg.lacrosse?.days ?? [],
-    lacrosseTime: cfg.lacrosse?.time ?? "",
-    tennisDays: cfg.tennis?.days ?? [],
+    longestRunMi: inputs.longestRunMi || "",
+    manualLifts: (Array.isArray(cfg.manual_lifts) ? cfg.manual_lifts : []).join(", "),
+    emailTo: cfg.email_to ?? "",
     advanced: Object.keys(advanced).length ? JSON.stringify(advanced, null, 2) : "",
   };
-  const ready = status.connected && Boolean(cfg.race?.date);
+  const ready = status.connected && answered;
 
   return (
     <>
@@ -128,7 +146,7 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
             <p className="mt-1 max-w-md text-sm text-zinc-400">
               {status.connected
                 ? "Recovery, sleep, cycles and workouts are read each morning. Nothing is written back to WHOOP."
-                : "You sign in on WHOOP's own page and approve read access to recovery, sleep, cycles and workouts."}
+                : "You sign in on WHOOP's own page and approve read access. Connect first and the questions below can use your history."}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -145,25 +163,23 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
         </div>
       </section>
 
-      <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <div className="pt-2">
         <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Step 2</p>
-        <h2 className="mt-1 text-lg font-semibold text-white">Training profile</h2>
-        <SetupForm
-          key={JSON.stringify(defaults)}
-          defaults={defaults}
-          accountEmail={user.email ?? ""}
-        />
-      </section>
-
-      <section className="rounded-xl border border-zinc-800 bg-zinc-900/20 p-5">
-        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Then</p>
-        <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+        <h2 className="mt-1 text-lg font-semibold text-white">Build your plan</h2>
+        <p className="mt-1 text-sm text-zinc-400">
           {ready
-            ? `You're set. The morning email goes to ${cfg.email_to || user.email} once WHOOP scores your recovery.`
-            : "Once WHOOP is connected and a race date is saved, the morning email starts on its own."}{" "}
-          Log lifts in the Workout Journal so the plan knows what you actually did.
+            ? `You're set: the morning email goes to ${cfg.email_to || user.email}. Change any answer and tomorrow's plan follows it.`
+            : "Seven questions. Each one changes the week the plan builds."}
         </p>
-      </section>
+      </div>
+
+      <SetupForm
+        key={JSON.stringify(defaults)}
+        defaults={defaults}
+        accountEmail={user.email ?? ""}
+        sportsSeen={sportsSeen}
+        zone2Suggestion={zone2Suggestion}
+      />
     </>
   );
 }

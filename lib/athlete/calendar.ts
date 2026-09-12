@@ -1,13 +1,16 @@
 /**
- * The full plan, week by week, from today to race day.
+ * The plan, week by week: to race day when there is a race, otherwise twelve
+ * weeks ahead.
  *
  * Built from the same engine the morning email uses, so the calendar and the
  * daily call can never disagree. Structure follows the meso-cycle model: 4-week
  * blocks, each with one job, each ending in a recovery week where volume drops
  * and mobility work rises.
  */
-import { racePlan, weekTemplate, mesocycle, readiness, personalFrom,
-         type Slot, type Personal } from "./decide";
+import {
+  racePlan, weekTemplate, mesocycle, readiness, personalFrom, liftOf, clock,
+  type Slot, type Personal, type PlanInputs,
+} from "./decide";
 
 export type CalendarDay = {
   date: string;
@@ -43,25 +46,38 @@ function monday(day: string) {
   return shift(day, -((d.getUTCDay() + 6) % 7));
 }
 
+const LIFT_WORD: Record<string, string> = {
+  legs: "leg", pull: "pull", push: "push", upper: "upper-body", "full body": "full-body",
+};
+
+const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 /** Session detail for a slot, given where the plan is that week. */
 function detailFor(kind: string, longMi: number, easyMin: number, z2: number,
-                   recoveryWeek: boolean, unlocked: ReturnType<typeof readiness>,
-                   personal: Personal) {
+                   recoveryWeek: boolean, personal: Personal) {
+  if (kind === "long run") {
+    // longMi already carries the cutback: the ladder discounts recovery
+    // weeks when it is built. Discounting again here would halve them.
+    return recoveryWeek ? `${longMi} mi easy — cutback week` : `${longMi} mi, under ${z2} bpm`;
+  }
+
+  if (kind === "run" || kind.endsWith("+run")) {
+    const lift = liftOf(kind);
+    return `${recoveryWeek ? Math.round(easyMin * 0.75) : easyMin} min easy, under ${z2} bpm`
+      + (lift ? ` + ${LIFT_WORD[lift]} lift` : "");
+  }
+
+  const activity = personal.activities.find((a) => a.sport === kind);
+  if (activity) {
+    const cost = personal.activityCosts[activity.sport];
+    const size = activity.intensity === "hard" ? "the biggest session of the week"
+      : activity.intensity === "easy" ? "light, barely a recovery cost"
+      : cost && cost.value < -0.5 ? `a real session, about ${Math.abs(cost.value).toFixed(0)} recovery points`
+      : "a real session";
+    return activity.time ? `${clock(activity.time)} — ${size}` : capitalise(size);
+  }
+
   switch (kind) {
-    case "long run":
-      // longMi already carries the cutback: the ladder discounts recovery
-      // weeks when it is built. Discounting again here would halve them.
-      return recoveryWeek
-        ? `${longMi} mi easy — cutback week`
-        : `${longMi} mi, under ${z2} bpm`;
-    case "run":
-    case "pull+run":
-      return `${recoveryWeek ? Math.round(easyMin * 0.75) : easyMin} min easy, under ${z2} bpm`
-        + (kind === "pull+run" ? " + pull lift" : "");
-    case "lacrosse":
-      return personal.lacrosseTime
-        ? `${personal.lacrosseTime} — the biggest session of the week`
-        : "The biggest session of the week";
     case "legs":
       return recoveryWeek ? "Lighter. Hold weights, add the mobility block."
                           : "Rotates: quad / hip-adductor / posterior";
@@ -69,8 +85,10 @@ function detailFor(kind: string, longMi: number, easyMin: number, z2: number,
       return personal.cues.push ?? "Upper body — the cheapest session of the week";
     case "pull":
       return personal.cues.pull ?? "Rows and a vertical pull";
-    case "tennis":
-      return "About an hour. Costs a third of what a run costs";
+    case "upper":
+      return personal.cues.upper ?? "Push or pull, whichever is due";
+    case "full body":
+      return personal.cues["full body"] ?? "What leads rotates each time";
     case "rest":
       return "Rest or a slow 15-minute walk";
     default:
@@ -79,24 +97,29 @@ function detailFor(kind: string, longMi: number, easyMin: number, z2: number,
 }
 
 export function buildCalendar(opts: {
-  raceDate: string; today: string; recentLongMi: number; longestEver: number;
-  lacrosseDays: string[]; tennisDays?: string[]; personal?: Personal;
-  z2: number; consistencyWeeks: number;
+  inputs: PlanInputs;
+  today: string;
+  recentLongMi: number;
+  consistencyWeeks: number;
+  personal?: Personal;
 }): { weeks: CalendarWeek[]; unlocked: ReturnType<typeof readiness> } {
-  const { raceDate, today, lacrosseDays, z2 } = opts;
-  const plan = racePlan(raceDate, today, opts.recentLongMi, opts.longestEver);
+  const { inputs, today } = opts;
+  const z2 = inputs.zone2;
+  const plan = racePlan(inputs.race, today, opts.recentLongMi, inputs.longestRunMi);
   const personal = opts.personal ?? personalFrom({});
-  const template = weekTemplate(lacrosseDays, opts.tennisDays ?? [], personal.lacrosseTime);
+  const template = weekTemplate(inputs);
   const unlocked = readiness(opts.consistencyWeeks);
 
   const weeks: CalendarWeek[] = [];
   const firstMonday = monday(today);
+  const horizon = inputs.race ? plan.weeks_out + 1 : plan.schedule_all.length;
 
-  for (let w = 0; w < plan.weeks_out + 1; w++) {
+  for (let w = 0; w < horizon; w++) {
     const idx = w;
     const start = shift(firstMonday, w * 7);
     // Phase reflects weeks actually trained, plus the weeks ahead in this plan.
-    const meso = mesocycle(opts.consistencyWeeks + w, plan.weeks_out - w);
+    const meso = mesocycle(opts.consistencyWeeks + w,
+                           inputs.race ? plan.weeks_out - w : Infinity);
 
     // Long run and easy run both grow; the long run stays 1.4x the easy run at
     // most, because a long run three times the usual one is how people get hurt.
@@ -105,9 +128,9 @@ export function buildCalendar(opts: {
       Math.round((plan.anchored_on_mi * 10) / 1.8 / 5) * 5));
     const easyMin = Math.min(70, easyBase + Math.floor(idx / 3) * 5);
     const ratio = easyMin >= 45 ? 1.8 : 1.4;
-    const isRaceWeek = w === plan.weeks_out;
-    const cappedLong = isRaceWeek
-      ? 13.1
+    const raceWeek = inputs.race && w === plan.weeks_out ? inputs.race : null;
+    const cappedLong = raceWeek
+      ? raceWeek.miles
       : Math.min(longMi, Math.max(plan.anchored_on_mi,
           Math.round((easyMin * ratio) / 10 * 10) / 10));
 
@@ -116,7 +139,7 @@ export function buildCalendar(opts: {
       const [kind, note] = (template[dw] ?? ["rest", ""]) as Slot;
       return {
         date, dow: dw, kind, note,
-        detail: detailFor(kind, cappedLong, easyMin, z2, meso.recovery_week, unlocked, personal),
+        detail: detailFor(kind, cappedLong, easyMin, z2, meso.recovery_week, personal),
         today: date === today,
       };
     });

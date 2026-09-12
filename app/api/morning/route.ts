@@ -15,12 +15,13 @@ import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { admin } from "@/lib/athlete/supabase";
-import { accessToken, pull } from "@/lib/athlete/whoop";
+import { accessToken, body, pull } from "@/lib/athlete/whoop";
 import { renderEmail, sendEmail } from "@/lib/athlete/email";
 import {
   buildState, racePlan, weekTemplate, decide, prescribe,
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
-  runConsistencyWeeks, readiness, mesocycle, personalFrom,
+  runConsistencyWeeks, readiness, mesocycle, personalFrom, planInputs,
+  whoopSportSummary, activityCosts,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
@@ -127,8 +128,8 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
   const { data: prof } = await db.from("athlete_profile").select("config")
     .eq("user_id", userId).maybeSingle();
   const cfg = (prof?.config ?? null) as Record<string, any> | null;
-  if (!cfg?.race?.date)
-    return { user_id: userId, sent: false, skipped: "profile incomplete: no race date" };
+  if (!cfg)
+    return { user_id: userId, sent: false, skipped: "no training profile yet" };
 
   // Cheap check first: an athlete already emailed today costs no WHOOP call.
   const lastKnownToday = dayAt(cfg.utc_offset_minutes ?? 0);
@@ -187,7 +188,8 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
     ...fromApp,
   ];
 
-  const w = await pull(await accessToken(userId));
+  const at = await accessToken(userId);
+  const w = await pull(at);
   if (!(w.recovery as any[]).some((r) => r.score))
     return { user_id: userId, sent: false, waiting: true, reason: "no scored recovery on WHOOP yet" };
   const state = buildState(w);
@@ -198,9 +200,23 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
   const latestSleep = [...(w.sleep as any[])]
     .sort((a, b) => String(b.start).localeCompare(String(a.start)))[0];
   const offset = offsetMinutes(latestSleep?.timezone_offset) ?? cfg.utc_offset_minutes ?? 0;
-  if (offset !== cfg.utc_offset_minutes) {
-    await db.from("athlete_profile")
-      .update({ config: { ...cfg, utc_offset_minutes: offset } }).eq("user_id", userId);
+  // What each sport costs this athlete, measured from their own history. Kept
+  // on the profile, at most once a day, so the setup page and calendar can
+  // show it without calling WHOOP themselves.
+  const sports = whoopSportSummary(w);
+  if (offset !== cfg.utc_offset_minutes || cfg.whoop_summary?.updated !== state.date) {
+    const measured = cfg.whoop_summary?.max_heart_rate ? null : await body(at).catch(() => null);
+    await db.from("athlete_profile").update({ config: {
+      ...cfg,
+      utc_offset_minutes: offset,
+      whoop_summary: {
+        ...(cfg.whoop_summary ?? {}),
+        updated: state.date,
+        sports,
+        resting_heart_rate: state.rhr ?? null,
+        ...(measured?.max_heart_rate ? { max_heart_rate: measured.max_heart_rate } : {}),
+      },
+    } }).eq("user_id", userId);
   }
 
   // Has today's recovery actually landed? If not, say so and wait.
@@ -223,17 +239,18 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
         recentLong = Math.max(recentLong, x.score.distance_meter / 1609.34);
   }
 
-  const plan = racePlan(cfg.race.date, state.date, recentLong,
-                        cfg.race.longest_run_ever_mi ?? 0);
+  const inputs = planInputs(cfg);
+  const plan = racePlan(inputs.race, state.date, recentLong, inputs.longestRunMi);
   const personal = personalFrom(cfg);
-  const template = weekTemplate(cfg.lacrosse?.days ?? [], cfg.tennis?.days ?? [],
-                                personal.lacrosseTime);
-  const z2 = cfg.athlete?.zone2_ceiling_bpm ?? 145;
+  personal.activityCosts = activityCosts(inputs.activities, sports, tun);
+  const template = weekTemplate(inputs);
+  const z2 = inputs.zone2;
   const decision = decide(state, plan, template, tun, z2, personal);
   // Readiness is measured, not scheduled: consecutive weeks with at least
   // two runs. Adding a run type before the criteria are met is the fastest
   // way to get hurt, and the calendar cannot tell whether the work happened.
-  const consistency = runConsistencyWeeks(state._workouts as any, state.date);
+  const consistency = runConsistencyWeeks(state._workouts as any, state.date,
+                                          Math.min(2, Math.max(1, inputs.runDays)));
   const ready = readiness(consistency);
   const session = prescribe(sets, decision.planned, decision.level, z2,
                             plan.long_run_this_week_mi,
@@ -242,7 +259,7 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
                               easyMinutes: plan.easy_run_minutes, personal });
   const dist = intensityDistribution(state._workouts as any, state.date);
   // Phase follows weeks actually trained, not weeks elapsed.
-  const meso = mesocycle(consistency, plan.weeks_out);
+  const meso = mesocycle(consistency, inputs.race ? plan.weeks_out : Infinity);
   const { per_week, flags } = imbalances(sets, state.date);
   const warns = loadWarnings(sets, state.date, tun);
 
@@ -257,6 +274,7 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
     protocols: PROTOCOLS.map(({ id, title, source, confidence, reviewed }) =>
       ({ id, title, source, confidence, reviewed })),
     tunables: tun,
+    activity_costs: personal.activityCosts,
   };
 
   if (opts.dry) return { user_id: userId, sent: false, dry: true, ...payload };

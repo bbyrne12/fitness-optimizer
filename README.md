@@ -29,8 +29,10 @@ equipment, weights selection toward the muscles flagged as underworked, and
 prescribes volume by experience level. Workouts are logged on a calendar, or
 pasted in as free text and parsed.
 
-**The morning decision.** Anyone can sign up and connect their own WHOOP account
-through OAuth on the setup page. A scheduled job hits `/api/morning`, which, for
+**The morning decision.** Anyone can sign up, connect their own WHOOP account
+through OAuth, and answer a few setup questions: main goal, race, lifting and
+running days, and any other sports on set days. A scheduled job hits
+`/api/morning`, which, for
 each connected athlete, pulls last night's WHOOP recovery, sleep and strain,
 combines it with their training history, and emails a single decision: train or back off, which session, which exercises,
 and what weight for each based on the last time that lift was performed. The
@@ -67,13 +69,14 @@ limits a signed-in user to their own rows. WHOOP tokens have no policy at all,
 so only the service role key, which lives in Vercel's environment, can read
 them.
 
-**The tunables are calibrated against data, and say so when the data is thin.**
-Each activity carries a recovery cost estimated from the athlete's own history.
-Where the sample is small the comment records the sample size, the standard
-error, and what would change the number. The tennis cost, for example, is
-documented as the weakest-evidenced value in the set, derived from seven clean
-sessions with a next-day residual of -1.8 ± 5.9, which is statistically
-indistinguishable from zero, and set conservatively for a stated reason.
+**Each sport's recovery cost is measured from the athlete's own WHOOP history.**
+For every sport in their record, the engine compares next-morning recovery after
+days they did it against what mean reversion alone predicts, counting only days
+where that sport was the one real session, so a run and a match on the same day
+are not blamed on either. A measured cost is used once it rests on five or more
+sessions; until then the athlete's own easy/moderate/hard rating stands in, and a
+value set on the profile overrides both. The setup page shows each sport's cost,
+and the email says when a number was measured.
 
 **Recommendations trace to a source.** `lib/athlete/protocols.ts` holds the
 external research separately from the engine. Every protocol carries the
@@ -131,12 +134,13 @@ The app runs on those two alone. The morning decision additionally needs
 Resend: its test sender only delivers to the Resend account's own address.
 
 Everything specific to an athlete lives in their `athlete_profile` row, set from
-the setup page rather than the code: race date, sport days and times, zone 2
-ceiling, email address, per-session cues, lifts to keep off
-automatic progression (`manual_lifts`), replacement "add today" exercises
-(`additions`), a measured cadence, and overrides for any tunable. The recovery
-costs in `DEFAULT_TUNABLES` were calibrated on one athlete's WHOOP history and
-are meant to be refit for anyone else.
+the setup questions rather than the code: main goal, race distance and date,
+lifting and running days, other activities with their days and intensity, zone 2
+ceiling, email address and lifts to keep off automatic progression, plus, as
+JSON, per-session cues, replacement "add today" exercises, a measured cadence
+and tunable overrides. The running and lifting costs in `DEFAULT_TUNABLES` were
+calibrated on one athlete's history; every other activity's cost is measured per
+athlete.
 
 `GET /api/morning?dry=1` runs the whole pipeline, sends nothing, and returns the
 decision as JSON. That is the fastest way to see what the engine does.

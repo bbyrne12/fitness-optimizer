@@ -99,7 +99,7 @@ export async function connect(userId: string, code: string, redirectUri: string)
     code,
     redirect_uri: redirectUri,
   });
-  await persist(userId, t);
+  return (await persist(userId, t)).access_token;
 }
 
 export async function accessToken(userId: string): Promise<string> {
@@ -165,6 +165,11 @@ async function page(path: string, at: string, cap = 400) {
     token = d.next_token;
     if (!token || out.length >= cap) return out;
   }
+}
+
+/** Height, weight and max heart rate, as WHOOP has them. */
+export async function body(at: string) {
+  return get("/v2/user/measurement/body", at) as Promise<{ max_heart_rate?: number }>;
 }
 
 /** Only what the decision needs: ~90 days is plenty for 30-day baselines. */

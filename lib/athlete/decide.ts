@@ -14,8 +14,6 @@ export type Tunables = {
   recovery_green: number;
   recovery_red: number;
   cost_running: number;
-  cost_lacrosse: number;
-  cost_tennis: number;
   cost_legs_quad: number;
   cost_lift_upper: number;
   sleep_debt_downgrade: number;
@@ -29,14 +27,9 @@ export const DEFAULT_TUNABLES: Tunables = {
   recovery_green: 67,
   recovery_red: 34,
   cost_running: -11.0,
-  cost_lacrosse: -4.1,
-  // Seven clean racquet days (tennis, paddle, pickleball, none of them sharing
-  // a day with a run or lacrosse): mean next-day residual -1.8, sd 15.6, so
-  // se 5.9 -- statistically indistinguishable from free. Set at -3 rather than
-  // -2 because the one high-strain session in the set (15.2) was followed by a
-  // 33-point drop, so the cost plainly scales with how hard the session is. Revisit
-  // once there are a dozen sessions; this is the weakest-evidenced cost here.
-  cost_tennis: -3.0,
+  // Sports are not listed: each one's cost is measured per athlete from their
+  // own WHOOP history (whoopSportSummary), and `cost_<sport>` in a profile's
+  // tunables overrides that.
   cost_legs_quad: -3.5,
   cost_lift_upper: -0.6,
   sleep_debt_downgrade: 2.0,
@@ -46,10 +39,118 @@ export const DEFAULT_TUNABLES: Tunables = {
   default_sets: 3,
 };
 
+export type Goal = "hrv" | "race" | "strength" | "general";
+export type Distance = "5k" | "10k" | "half" | "marathon";
+export type Intensity = "easy" | "moderate" | "hard";
+
+/** What each race builds to: the peak long run before the taper, then the race. */
+export const RACE_DISTANCES: Record<Distance, { label: string; miles: number; peakLongMi: number }> = {
+  "5k": { label: "5K", miles: 3.1, peakLongMi: 6 },
+  "10k": { label: "10K", miles: 6.2, peakLongMi: 9 },
+  half: { label: "Half marathon", miles: 13.1, peakLongMi: 11 },
+  marathon: { label: "Marathon", miles: 26.2, peakLongMi: 20 },
+};
+
+/** Something the athlete does on set days: a sport, a practice, a class. */
+export type Activity = {
+  /** WHOOP's sport_name where it has one, so the cost can be measured. */
+  sport: string;
+  label: string;
+  days: string[];
+  time: string | null;
+  intensity: Intensity;
+};
+
+/** Everything the shape of the plan comes from, read off the profile. */
+export type PlanInputs = {
+  goal: Goal;
+  race: { distance: Distance; date: string; name: string; miles: number; peakLongMi: number } | null;
+  liftDays: number;
+  runDays: number;
+  longRunDay: "Sat" | "Sun";
+  activities: Activity[];
+  zone2: number;
+  longestRunMi: number;
+};
+
+const GOALS: Goal[] = ["hrv", "race", "strength", "general"];
+const INTENSITIES: Intensity[] = ["easy", "moderate", "hard"];
+
+const dayCount = (n: unknown, fallback: number) => {
+  const x = Math.round(Number(n));
+  return n === undefined || n === null || !Number.isFinite(x) ? fallback : Math.min(5, Math.max(0, x));
+};
+
+/**
+ * Reads a profile into plan inputs. Profiles saved before goals and activities
+ * existed -- a bare race plus lacrosse and tennis keys -- are read the way the
+ * engine always read them, so they keep producing the same week until the
+ * setup form is saved.
+ */
+export function planInputs(cfg: Record<string, any>): PlanInputs {
+  const r = cfg.goals
+    ? cfg.goals.race
+    : cfg.race?.date ? { distance: "half", date: cfg.race.date, name: cfg.race.name } : null;
+  const distance: Distance = r && RACE_DISTANCES[r.distance as Distance] ? r.distance : "half";
+  const race = r?.date && !Number.isNaN(Date.parse(r.date))
+    ? {
+        distance,
+        date: String(r.date),
+        name: String(r.name || RACE_DISTANCES[distance].label),
+        miles: RACE_DISTANCES[distance].miles,
+        peakLongMi: RACE_DISTANCES[distance].peakLongMi,
+      }
+    : null;
+
+  const activities: Activity[] = Array.isArray(cfg.activities)
+    ? cfg.activities.flatMap((a: any): Activity[] => {
+        const days = (Array.isArray(a?.days) ? a.days : [])
+          .map(String).filter((d: string) => (DOW as readonly string[]).includes(d));
+        const sport = String(a?.sport ?? "").trim().toLowerCase();
+        if (!sport || !days.length) return [];
+        return [{
+          sport,
+          label: String(a.label || sport),
+          days,
+          time: typeof a.time === "string" && a.time ? a.time : null,
+          intensity: INTENSITIES.includes(a.intensity) ? a.intensity : "moderate",
+        }];
+      })
+    : [
+        // The two fixtures the engine knew before activities existed.
+        ...(cfg.lacrosse?.days?.length
+          ? [{ sport: "lacrosse", label: "Lacrosse", days: cfg.lacrosse.days,
+               time: cfg.lacrosse.time ?? null, intensity: "hard" as const }]
+          : []),
+        ...(cfg.tennis?.days?.length
+          ? [{ sport: "tennis", label: "Tennis", days: cfg.tennis.days,
+               time: null, intensity: "moderate" as const }]
+          : []),
+      ];
+
+  const week = cfg.week ?? {};
+  return {
+    goal: GOALS.includes(cfg.goals?.primary) ? cfg.goals.primary : race ? "race" : "general",
+    race,
+    liftDays: dayCount(week.lift_days, 3),
+    runDays: dayCount(week.run_days, 2),
+    longRunDay: week.long_run_day === "Sun" ? "Sun" : "Sat",
+    activities,
+    zone2: Number(cfg.athlete?.zone2_ceiling_bpm) || 145,
+    longestRunMi: Number(cfg.athlete?.longest_run_mi ?? cfg.race?.longest_run_ever_mi) || 0,
+  };
+}
+
+export type ActivityCost = {
+  value: number;
+  n: number;
+  source: "measured" | "profile" | "default";
+};
+
 /**
  * Everything specific to one athlete that the engine needs to word or shape a
  * day: session cues, lifts to leave off auto-progression, replacement "add
- * today" exercises, a sport's start time, a measured cadence. It lives in
+ * today" exercises, a measured cadence, their goal and activities. It lives in
  * athlete_profile.config -- data, not code -- so the code stays neutral and a
  * different athlete only needs a different profile.
  */
@@ -57,12 +158,15 @@ export type Personal = {
   cues: Record<string, string>;
   manualLifts: string[];
   additions: Record<string, [string, string, string]>;
-  lacrosseTime: string | null;
   cadenceSpm: number | null;
+  goal: Goal;
+  activities: Activity[];
+  /** What each activity costs this athlete; filled in with activityCosts(). */
+  activityCosts: Record<string, ActivityCost>;
 };
 
 /** "18:00" -> "6pm", "18:30" -> "6:30pm". Anything unparseable passes through. */
-function clock(t: unknown): string | null {
+export function clock(t: unknown): string | null {
   if (typeof t !== "string" || !t) return null;
   const m = /^(\d{1,2}):(\d{2})$/.exec(t.trim());
   if (!m) return t;
@@ -74,12 +178,15 @@ export function personalFrom(cfg: Record<string, any>): Personal {
   const additions: Record<string, [string, string, string]> = {};
   for (const [kind, a] of Object.entries(cfg.additions ?? {}))
     if (Array.isArray(a) && a.length === 3) additions[kind] = a as [string, string, string];
+  const inputs = planInputs(cfg);
   return {
     cues: { ...(cfg.cues ?? {}) },
     manualLifts: Array.isArray(cfg.manual_lifts) ? cfg.manual_lifts : [],
     additions,
-    lacrosseTime: clock(cfg.lacrosse?.time),
     cadenceSpm: typeof cfg.cadence_spm === "number" ? cfg.cadence_spm : null,
+    goal: inputs.goal,
+    activities: inputs.activities,
+    activityCosts: {},
   };
 }
 
@@ -134,6 +241,88 @@ const sd = (xs: number[]) => {
 };
 
 /* ------------------------------------------------------------------ state */
+
+/** Sessions that barely register the next morning and would muddy a sport's cost. */
+const BACKGROUND = new Set(["walking", "meditation", "activity", "yoga", "stretching"]);
+/** Below this many clean sessions a measured cost is noise, and is not used. */
+const MIN_MEASURED = 5;
+/** Stand-in costs, by how hard the athlete rates the activity. */
+export const INTENSITY_COST: Record<Intensity, number> = { easy: -1, moderate: -3, hard: -5 };
+
+/**
+ * Every sport in an athlete's WHOOP history, with what it costs them: the
+ * next morning's recovery after days they did it, against what mean reversion
+ * alone predicts (a bad morning tends to be followed by a better one and the
+ * reverse, whatever happened in between). Only days where that sport was the
+ * one real session count, so a run and a match on the same day are not blamed
+ * on either.
+ */
+export function whoopSportSummary(w: Rec) {
+  const rec: Record<string, number> = {};
+  for (const r of w.recovery ?? [])
+    if (r.score?.recovery_score != null) rec[localDay(r.created_at)] = r.score.recovery_score;
+
+  const sportsByDay: Record<string, Set<string>> = {};
+  const sessions: Record<string, number> = {};
+  for (const x of w.workouts ?? []) {
+    if (!x.sport_name) continue;
+    const sport = String(x.sport_name);
+    sessions[sport] = (sessions[sport] ?? 0) + 1;
+    (sportsByDay[localDay(x.start, x.timezone_offset)] ??= new Set()).add(sport);
+  }
+
+  const pairs: [number, number][] = [];
+  for (const d of Object.keys(rec))
+    if (rec[shift(d, 1)] != null) pairs.push([rec[d], rec[shift(d, 1)]]);
+
+  const residuals: Record<string, number[]> = {};
+  if (pairs.length >= 20) {
+    const mx = mean(pairs.map((p) => p[0]));
+    const my = mean(pairs.map((p) => p[1]));
+    const sxx = pairs.reduce((a, [x]) => a + (x - mx) ** 2, 0);
+    const slope = sxx ? pairs.reduce((a, [x, y]) => a + (x - mx) * (y - my), 0) / sxx : 0;
+    const intercept = my - slope * mx;
+    for (const [d, sports] of Object.entries(sportsByDay)) {
+      const real = [...sports].filter((s) => !BACKGROUND.has(s));
+      const next = rec[shift(d, 1)];
+      if (real.length !== 1 || rec[d] == null || next == null) continue;
+      (residuals[real[0]] ??= []).push(next - (slope * rec[d] + intercept));
+    }
+  }
+
+  return Object.entries(sessions)
+    .filter(([sport]) => !BACKGROUND.has(sport))
+    .map(([sport, count]) => {
+      const res = residuals[sport] ?? [];
+      return {
+        sport,
+        sessions: count,
+        n: res.length,
+        cost: res.length >= MIN_MEASURED ? Math.round(mean(res) * 10) / 10 : null,
+      };
+    })
+    .sort((a, b) => b.sessions - a.sessions);
+}
+
+/**
+ * The recovery cost used for each activity: a value set on the profile wins,
+ * then one measured from WHOOP, then a stand-in for how hard it is rated.
+ */
+export function activityCosts(activities: Activity[],
+                              summary: ReturnType<typeof whoopSportSummary>,
+                              tunables: Record<string, any>): Record<string, ActivityCost> {
+  const out: Record<string, ActivityCost> = {};
+  for (const a of activities) {
+    const override = tunables[`cost_${a.sport.replace(/[^a-z0-9]+/g, "_")}`];
+    const seen = summary.find((s) => s.sport === a.sport);
+    out[a.sport] = typeof override === "number"
+      ? { value: override, n: seen?.n ?? 0, source: "profile" }
+      : seen?.cost != null
+        ? { value: seen.cost, n: seen.n, source: "measured" }
+        : { value: INTENSITY_COST[a.intensity], n: seen?.n ?? 0, source: "default" };
+  }
+  return out;
+}
 
 export function buildState(w: Rec) {
   const rec: Record<string, Rec> = {};
@@ -244,18 +433,22 @@ export function readiness(weeks: number) {
 
 /* ------------------------------------------------------------------- plan */
 
-export function racePlan(raceDate: string, today: string, achievedLongMi: number,
+/** How far ahead the plan looks when there is no race to count down to. */
+export const HORIZON_WEEKS = 12;
+
+export function racePlan(race: PlanInputs["race"], today: string, achievedLongMi: number,
                          longestEver: number) {
-  const weeksOut = Math.max(
-    0,
-    Math.floor((Date.parse(raceDate) - Date.parse(today)) / (7 * DAY)),
-  );
+  // Without a race the plan still looks twelve weeks ahead: the long run grows
+  // gently from wherever it is, with the same cutback every fourth week.
+  const weeksOut = race
+    ? Math.max(0, Math.floor((Date.parse(race.date) - Date.parse(today)) / (7 * DAY)))
+    : HORIZON_WEEKS;
   // Anchored on what has actually been run in the last three weeks, not on a
   // position in a ladder written months ago. Recomputed every morning, so a
   // missed fortnight moves the plan instead of leaving the athlete chasing it.
   const start = Math.max(achievedLongMi, 3.0);
-  const peak = 11.0;
-  const build = Math.max(1, weeksOut - 3);
+  const peak = race ? race.peakLongMi : Math.max(start, Math.min(start * 1.5, 8));
+  const build = race ? Math.max(1, weeksOut - 3) : HORIZON_WEEKS;
   const growthWeeks = Math.max(1, build - 1 - Math.floor((build - 1) / 4));
 
   // What growth rate would be needed, and what is actually safe.
@@ -277,11 +470,12 @@ export function racePlan(raceDate: string, today: string, achievedLongMi: number
   }
   // Where the build actually lands at a safe growth rate.
   const reachable = Math.round(schedule[schedule.length - 1] * 10) / 10;
-  schedule.push(
-    Math.round(reachable * 0.72 * 10) / 10,
-    Math.round(reachable * 0.45 * 10) / 10,
-    13.1,
-  );
+  if (race)
+    schedule.push(
+      Math.round(reachable * 0.72 * 10) / 10,
+      Math.round(reachable * 0.45 * 10) / 10,
+      race.miles,
+    );
 
   // The easy run is anchored on reality too: someone already running 6-mile
   // long runs is not doing 25-minute midweek runs, and pretending otherwise
@@ -300,7 +494,9 @@ export function racePlan(raceDate: string, today: string, achievedLongMi: number
 
   const thisWeekRaw = schedule[0];
   return {
-    race_date: raceDate,
+    race_date: race?.date ?? null,
+    race_miles: race?.miles ?? null,
+    has_race: Boolean(race),
     weeks_out: weeksOut,
     long_run_this_week_mi: Math.min(thisWeekRaw, cap(0)),
     easy_run_minutes: easyMinutes(0),
@@ -349,53 +545,125 @@ export function mesocycle(consistencyWeeks: number, weeksOut: number) {
 
 export type Slot = [string, string];
 
-export function weekTemplate(lacrosseDays: string[],
-                             tennisDays: string[] = [],
-                             lacrosseTime: string | null = null): Record<string, Slot> {
-  const t: Record<string, Slot> = {
-    Sat: ["long run", "The long run. The session the race is built on."],
-    Sun: ["rest", "Rest, or a walk."],
-  };
-  for (const d of lacrosseDays)
-    if (d !== "Sat" && d !== "Sun")
-      t[d] = ["lacrosse", `Lacrosse${lacrosseTime ? " " + lacrosseTime : ""}. Biggest session of your week.`];
-  // Tennis after lacrosse: where they collide lacrosse keeps the day, since it
-  // is the fixed commitment and tennis is the one scheduled around it.
-  for (const d of tennisDays)
-    if (d !== "Sat" && d !== "Sun" && !(d in t))
-      t[d] = ["tennis", "Tennis. Cheap in recovery terms — play it properly."];
+const DAY_NAME: Record<string, string> = {
+  Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday",
+  Fri: "Friday", Sat: "Saturday", Sun: "Sunday",
+};
 
-  const free = ["Mon", "Tue", "Wed", "Thu", "Fri"].filter((d) => !(d in t));
-  const lifts: Slot[] = [
-    ["legs", "Leg day. Furthest point from Saturday's long run."],
-    ["pull", "Pull lift."],
-    ["push", "Push lift. Legs stay fresh for Saturday."],
-  ];
+const LIFTS = new Set(["legs", "pull", "push", "upper", "full body"]);
+const LIFT_LABEL: Record<string, string> = {
+  legs: "Leg day", pull: "Pull lift", push: "Push lift",
+  upper: "Upper-body lift", "full body": "Full-body lift",
+};
 
-  let order: Slot[];
-  if (free.length > lifts.length) {
-    order = [lifts[0], ["run", "Easy zone 2 run, on its own day."], ...lifts.slice(1)];
-  } else {
-    order = lifts.map((s): Slot =>
-      s[0] === "pull"
-        ? ["pull+run", "Pull lift plus the easy run — the cheapest two to stack."]
-        : s,
-    );
+/** The lift in a session kind: "pull+run" -> "pull", "long run" -> null. */
+export function liftOf(kind: string): string | null {
+  const base = kind.endsWith("+run") ? kind.slice(0, -4) : kind;
+  return LIFTS.has(base) ? base : null;
+}
+
+const hasEasyRun = (kind: string) => kind === "run" || kind.endsWith("+run");
+
+/** The lifts a week holds, by how many lifting days the athlete wants. */
+const LIFT_SPLITS: string[][] = [
+  [],
+  ["full body"],
+  ["legs", "upper"],
+  ["legs", "pull", "push"],
+  ["legs", "pull", "push", "legs"],
+  ["legs", "pull", "push", "legs", "upper"],
+];
+
+/** A run stacks onto the cheapest lift available: pull first, push last. */
+const STACK_ORDER = ["pull", "upper", "full body", "push"];
+
+const ACTIVITY_NOTE: Record<Intensity, string> = {
+  hard: "Biggest session of your week.",
+  moderate: "A real session. Plan around it.",
+  easy: "Light. It barely costs recovery.",
+};
+
+/**
+ * A normal week, built from the athlete's answers: their activities on their
+ * days, the long run on its weekend day, a rest day after it, and lifts and
+ * easy runs spread over what is left.
+ */
+export function weekTemplate(
+  p: Pick<PlanInputs, "activities" | "liftDays" | "runDays" | "longRunDay" | "race">,
+): Record<string, Slot> {
+  const t: Record<string, Slot> = {};
+
+  // Fixed commitments first: they happen on those days whatever the plan says.
+  // Where two share a day, the one listed first keeps it.
+  for (const a of p.activities)
+    for (const d of a.days)
+      t[d] ??= [a.sport, `${a.label}${a.time ? " " + clock(a.time) : ""}. ${ACTIVITY_NOTE[a.intensity]}`];
+
+  // The long run takes its weekend day, or the other one if an activity has it.
+  let longDay: string | null = null;
+  if (p.runDays >= 1) {
+    const other = p.longRunDay === "Sat" ? "Sun" : "Sat";
+    longDay = !t[p.longRunDay] ? p.longRunDay : !t[other] ? other : null;
+    if (longDay)
+      t[longDay] = ["long run", p.race
+        ? "The long run. The session the race is built on."
+        : "The long run. Easy, and the longest of the week."];
   }
-  free.forEach((d, i) => { if (order[i]) t[d] = order[i]; });
+  const longName = DAY_NAME[longDay ?? p.longRunDay];
 
-  // A once-a-week fixture like tennis eats a weekday, and the lift that falls
-  // off the end is the last one in `order` -- the push day. Dropping a lift
-  // silently is the worst outcome
-  // available, so an unplaced lift takes Sunday instead. Upper-body work is
-  // the cheapest session there is (about 0.6 recovery points), which is why it
-  // can sit the day after the long run without costing the week anything.
-  const placed = new Set(Object.values(t).map((slot) => slot[0]));
-  const spill = order.filter((slot) => !placed.has(slot[0]));
-  if (spill.length && t.Sun?.[0] === "rest") {
-    const [kind] = spill[spill.length - 1];
-    t.Sun = [kind, `${kind === "push" ? "Push" : "Lift"} day, moved to Sunday — `
-      + "the week is full and upper body is the cheapest session to put here."];
+  // One protected rest day: the day after the long run.
+  const anchor = (longDay ?? p.longRunDay) as (typeof DOW)[number];
+  const restDay = DOW[(DOW.indexOf(anchor) + 1) % 7];
+  const reserveRest = !t[restDay];
+  const free: string[] = DOW.filter((d) => !t[d] && d !== restDay);
+
+  const lifts = LIFT_SPLITS[p.liftDays] ?? LIFT_SPLITS[3];
+  const weekdayLongRun = p.runDays >= 1 && !longDay;
+  const easyRuns = Math.max(0, p.runDays - 1);
+  const liftNote = (k: string) =>
+    k === "legs" ? `Leg day. Furthest point from ${longName}'s long run.`
+    : k === "push" ? `Push lift. Legs stay fresh for ${longName}.`
+    : k === "upper" ? "Upper-body lift: whichever of push or pull is due."
+    : k === "full body" ? "Full-body lift."
+    : "Pull lift.";
+
+  // Runs get their own days while there is room. The rest stack onto lifts,
+  // cheapest lift first and one run per lift; any still left do not fit.
+  const ownDays = Math.max(0, free.length - lifts.length - (weekdayLongRun ? 1 : 0));
+  let ownRuns = Math.min(easyRuns, ownDays);
+  let toStack = easyRuns - ownRuns;
+  const stacked = new Set<number>();
+  for (const k of STACK_ORDER)
+    lifts.forEach((l, i) => {
+      if (toStack > 0 && l === k && !stacked.has(i)) { stacked.add(i); toStack--; }
+    });
+
+  const queue: Slot[] = [];
+  if (weekdayLongRun)
+    queue.push(["long run", "The long run, on a weekday: both weekend days are taken."]);
+  lifts.forEach((k, i) => {
+    queue.push(stacked.has(i)
+      ? [`${k}+run`, `${LIFT_LABEL[k]} plus the easy run — the cheapest two to stack.`]
+      : [k, liftNote(k)]);
+    if (ownRuns > 0) { queue.push(["run", "Easy zone 2 run, on its own day."]); ownRuns--; }
+  });
+  for (; ownRuns > 0; ownRuns--) queue.push(["run", "Easy zone 2 run, on its own day."]);
+
+  free.forEach((d, i) => { if (queue[i]) t[d] = queue[i]; });
+
+  // A week too full for everything: rather than drop a session silently, the
+  // cheapest one left over takes the rest day. Upper-body work costs so little
+  // (about 0.6 recovery points) that it can sit the day after the long run.
+  const leftover = queue.slice(free.length);
+  if (leftover.length && reserveRest) {
+    const upper = [...leftover].reverse()
+      .find(([k]) => ["push", "pull", "upper"].includes(liftOf(k) ?? ""));
+    const [kind] = upper ?? leftover[leftover.length - 1];
+    t[restDay] = [kind,
+      `${kind === "push" ? "Push" : liftOf(kind) ? "Lift" : "Session"} day, moved to ${DAY_NAME[restDay]} — `
+      + `the week is full${upper ? " and upper body is the cheapest session to put here" : ""}.`];
+  } else if (reserveRest) {
+    t[restDay] = ["rest", "Rest, or a walk."];
   }
 
   for (const d of DOW) t[d] ??= ["rest", "Nothing scheduled."];
@@ -601,10 +869,8 @@ const ADDITIONS: Record<string, [string, string, string]> = {
     "A vertical pull, to balance rows and curls."],
   push: ["Face pulls", "3 x 12",
     "Rear delts and scapular control, to balance the pressing."],
-  // Lateral, stop-start sports load the shins and ankles, the tissue a running
-  // build is most exposed to. Calf and ankle work that day is cheap protection.
-  tennis: ["Single leg calf raises", "3 x 15 each side",
-    "Lateral, stop-start load on the calves and shins."],
+  upper: ["Face pulls", "3 x 12",
+    "Rear delts and scapular control, whichever half of the upper body is due."],
   rest: ["Ab circuit", "10 min",
     "Core work fits best on a rest day."],
   legs2: ["Mobility and isometric block", "15 min",
@@ -625,28 +891,33 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   const items: string[] = [];
   let source: string | null = null;
 
-  if (["push", "pull", "pull+run", "legs"].includes(planned)) {
-    let kind: string;
-    if (planned === "legs") {
-      // Rotate: whichever leg variant is least recent.
-      const opts = ["legs-quad", "legs-hip", "legs-posterior"]
-        .map((k) => ({ k, d: lastSessionOf(sets, k).day ?? "0000-00-00" }))
-        .sort((a, b) => a.d.localeCompare(b.d));
-      kind = opts[0].k;
-    } else {
-      kind = planned === "push" ? "push" : "pull";
-    }
+  const lift = liftOf(planned);
+  if (lift) {
+    // Legs rotate through their three variants, "upper" between push and pull,
+    // and full body through all five: whichever was done longest ago.
+    const rotation: Record<string, string[]> = {
+      legs: ["legs-quad", "legs-hip", "legs-posterior"],
+      upper: ["push", "pull"],
+      "full body": ["legs-quad", "push", "legs-posterior", "pull", "legs-hip"],
+      push: ["push"],
+      pull: ["pull"],
+    };
+    const kind = rotation[lift]
+      .map((k) => ({ k, d: lastSessionOf(sets, k).day ?? "0000-00-00" }))
+      .sort((a, b) => a.d.localeCompare(b.d))[0].k;
     const { day, exercises } = lastSessionOf(sets, kind);
     source = day;
     for (const e of exercises) {
       const load = e.weight ? `${e.weight}` : e.pin ?? "bodyweight";
-      const bump = progression(sets, e.exercise, e.weight, level, 3, personal.manualLifts);
+      // A strength goal earns the next load after two clean sessions, not three.
+      const bump = progression(sets, e.exercise, e.weight, level,
+                               personal.goal === "strength" ? 2 : 3, personal.manualLifts);
       items.push(`${e.exercise} — ${e.sets} x ${e.reps ?? "–"} @ ${load}` +
                  (bump ? `  ↑ go to ${bump}` : ""));
     }
   }
 
-  if (planned === "run" || (planned === "pull+run" && level === "green")) {
+  if (planned === "run" || (planned.endsWith("+run") && level === "green")) {
     const base = opts.easyMinutes ?? 25;
     items.push(`Easy run — ${level === "green" ? base : Math.round(base * 0.8)} min, under ${z2} bpm`);
   }
@@ -654,21 +925,21 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
     const mi = level === "green" ? longMi : Math.round(longMi * 0.75 * 10) / 10;
     items.push(`Long run — ${mi} mi, under ${z2} bpm`);
   }
-  if (planned === "lacrosse")
-    items.push(`Lacrosse${personal.lacrosseTime ? " — " + personal.lacrosseTime : ""}. That is the whole session.`);
-  if (planned === "tennis")
-    items.push("Tennis — that is the session. Around an hour.");
+  const activity = personal.activities.find((a) => a.sport === planned);
+  if (activity)
+    items.push(`${activity.label}${activity.time ? " — " + clock(activity.time) : ""}. That is the whole session.`);
 
   // Strides: top-end work that costs almost nothing in recovery, which is how
   // the polarized model gets its hard fraction back without a new session.
   if (opts.intervalsReady && level === "green" &&
-      (planned === "run" || planned === "pull+run"))
+      hasEasyRun(planned))
     items.push("Strides — 6 x 20s fast, full recovery between");
 
-  let add = personal.additions[planned] ?? ADDITIONS[planned];
-  // HRV is the stated primary goal, so when it is the thing that is off, the
-  // breathing protocol outranks whatever else was scheduled for today.
-  if ((opts.hrvStreak ?? 0) >= 2)
+  let add = personal.additions[planned] ?? ADDITIONS[planned] ?? ADDITIONS[lift ?? ""];
+  // When HRV is the thing that is off, the breathing protocol outranks whatever
+  // else was scheduled: after one low morning when HRV is the athlete's goal,
+  // after two otherwise.
+  if ((opts.hrvStreak ?? 0) >= (personal.goal === "hrv" ? 1 : 2))
     add = ["Slow breathing", "10 min at 6 breaths/min",
            "HRV has been below its band. Slow breathing is the best-evidenced " +
            "way to raise RMSSD: 5-15 ms over 4-6 weeks."];
@@ -739,43 +1010,60 @@ export function decide(state: ReturnType<typeof buildState>,
   const longMi = plan.long_run_this_week_mi;
   const tomorrowIsLongRun =
     template[DOW[(DOW.indexOf(state.dow as any) + 1) % 7]]?.[0] === "long run";
+  const lift = liftOf(planned);
+  const activity = personal.activities.find((a) => a.sport === planned);
+  const longRunDow = DOW.find((d) => template[d]?.[0] === "long run");
 
   if (level === "red") {
     call = planned === "rest" ? "Rest, as planned." : "Rest today.";
     detail = "Walk if you want to move. Nothing that adds strain.";
   } else if (planned === "rest") {
     call = "Rest day."; detail = "Nothing scheduled. A walk is free.";
-  } else if (planned === "lacrosse") {
-    call = level === "green" ? "Lacrosse tonight." : "Lacrosse tonight — pace yourself.";
-    detail = `Costs about ${Math.abs(tun.cost_lacrosse).toFixed(0)} recovery points, less than a hard run. No lift today.`;
-  } else if (planned === "tennis") {
-    call = level === "green" ? "Tennis today." : "Tennis today — keep it social.";
-    // The measured cost is about a third of a run's and well under lacrosse's,
-    // which is why it survives an amber morning when a run would not.
-    detail = `Costs roughly ${Math.abs(tun.cost_tennis).toFixed(0)} recovery points — `
-      + `a third of a run. No lift today; the lateral work is enough.`;
-    if (tomorrowIsLongRun)
-      detail += " Long run tomorrow, so stay off the hard lateral scrambling late in the session — that is the most shin-loading part of it.";
+  } else if (activity) {
+    const cost = personal.activityCosts[activity.sport]
+      ?? { value: INTENSITY_COST[activity.intensity], n: 0, source: "default" as const };
+    const when = Number(activity.time?.slice(0, 2)) >= 15 ? "tonight" : "today";
+    call = level === "green"
+      ? `${activity.label} ${when}.`
+      : `${activity.label} ${when} — ${activity.intensity === "hard" ? "pace yourself" : "keep it easy"}.`;
+    const points = Math.abs(cost.value);
+    detail = (cost.value >= -0.5
+        ? "It barely moves your recovery"
+        : `Costs about ${points.toFixed(0)} recovery points` +
+          (points < Math.abs(tun.cost_running) ? ", less than a hard run" : ""))
+      + (cost.source === "measured" ? ` (measured from ${cost.n} of your sessions)` : "")
+      + ". No lift today.";
+    if (tomorrowIsLongRun && activity.intensity !== "easy")
+      detail += " Long run tomorrow, so ease off late in the session.";
   } else if (planned === "long run") {
     let mi = level === "green" ? longMi : Math.round(longMi * 0.75 * 10) / 10;
     if (overCap) mi = Math.round(mi * 0.85 * 10) / 10;
     call = `Long run — ${mi} miles, easy.`;
-    detail = `Stay under ${z2} bpm the whole way. Week ${plan.weeks_out} out; this is the session the race is built on.`;
-  } else if ((planned === "pull+run" || planned === "run") && overCap && level !== "green") {
-    call = planned === "pull+run" ? "Pull lift only." : "Rest the legs today.";
+    detail = `Stay under ${z2} bpm the whole way. ` + (plan.has_race
+      ? `Week ${plan.weeks_out} out; this is the session the race is built on.`
+      : "The longest easy session of your week.");
+  } else if (hasEasyRun(planned) && overCap && level !== "green") {
+    call = lift ? `${LIFT_LABEL[lift]} only.` : "Rest the legs today.";
     detail = `You are already at this week's running cap (${tw} min vs ${lw} last week). Sudden volume jumps are where running injuries come from; the build holds.`;
-  } else if (planned === "pull+run" && level !== "green") {
-    call = "Pull lift only. Skip the run.";
+  } else if (lift && hasEasyRun(planned) && level !== "green") {
+    call = `${LIFT_LABEL[lift]} only. Skip the run.`;
     detail = `Amber, so the run goes. The lift costs about ${Math.abs(tun.cost_lift_upper).toFixed(1)} recovery points; the run costs ${Math.abs(tun.cost_running).toFixed(0)}.`;
-  } else if (planned === "pull+run" || planned === "run") {
+  } else if (hasEasyRun(planned)) {
     call = level === "green" ? "Easy run, 25–30 minutes." : "Easy run, 20 minutes, or skip it.";
     detail = `Under ${z2} bpm. Running costs you ${Math.abs(tun.cost_running).toFixed(0)} recovery points at your old intensity — zone 2 is the experiment.`;
-    if (planned === "pull+run") detail += " Pull lift too: rows, and add a vertical pull.";
+    if (lift) detail += lift === "pull"
+      ? " Pull lift too: rows, and add a vertical pull."
+      : ` ${LIFT_LABEL[lift]} too.`;
   } else if (planned === "legs") {
     call = level === "green" ? "Leg day." : "Leg day — hold the weights where they were.";
     detail = level === "green"
-      ? "Quad day costs about 3.5 recovery points. Saturday is far enough away."
+      ? `Quad day costs about 3.5 recovery points.${longRunDow ? ` ${DAY_NAME[longRunDow]} is far enough away.` : ""}`
       : "Amber recovery. Same session, no load increase.";
+  } else if (lift && lift !== "push") {
+    call = level === "green" ? `${LIFT_LABEL[lift]}.` : `${LIFT_LABEL[lift]} — hold at current weights.`;
+    detail = personal.cues[lift] ?? (lift === "full body"
+      ? "One session across the whole body; what leads rotates each time."
+      : "Upper body only — the cheapest session of the week.");
   } else {
     call = level === "green" ? "Push lift." : "Push lift — hold at current weights.";
     detail = personal.cues.push ?? "Upper body only — the cheapest session of the week.";
