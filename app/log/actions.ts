@@ -86,6 +86,7 @@ export async function saveLog(
   if (insErr) return { ok: false, message: `Could not save: ${insErr.message}` };
 
   revalidatePath("/calendar");
+  revalidatePath("/log-workout");
   return {
     ok: true,
     message:

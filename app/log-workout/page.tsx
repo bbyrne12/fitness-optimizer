@@ -5,6 +5,7 @@ import { AppNav } from "@/components/app-nav";
 import { createClient } from "@/lib/supabase/server";
 
 import { CalendarView } from "./calendar-view";
+import { PasteLog } from "@/components/paste-log";
 
 function JournalSkeleton() {
   return (
@@ -48,6 +49,10 @@ export default function LogWorkoutPage() {
           <Suspense fallback={<JournalSkeleton />}>
             <JournalContent />
           </Suspense>
+
+          <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+            <PasteLog compact />
+          </section>
         </div>
       </main>
     </>

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { admin } from "@/lib/athlete/supabase";
 
 import { CalendarGrid } from "./calendar-grid";
 
@@ -43,11 +44,7 @@ export async function CalendarView() {
     .gte("logged_at", since.toISOString())
     .order("logged_at", { ascending: false });
 
-  if (error) {
-    return <CalendarGrid initialWorkoutsByDay={{}} />;
-  }
-
-  const rows = (data ?? []) as unknown as LogJoinRow[];
+  const rows = error ? [] : ((data ?? []) as unknown as LogJoinRow[]);
 
   const workoutsByDay: Record<
     string,
@@ -63,6 +60,22 @@ export async function CalendarView() {
     }>
   > = {};
 
+  // Sessions typed into the paste box live in athlete_sets, which has no
+  // exercise_id -- the name is the name. They are merged in here so one
+  // calendar shows everything, however it was entered.
+  const db = admin();
+  const sinceDay = since.toISOString().slice(0, 10);
+  const [{ data: pasted }, { data: prof }] = await Promise.all([
+    db.from("athlete_sets")
+      .select("id,day,exercise,weight,reps,sets")
+      .gte("day", sinceDay)
+      .order("day", { ascending: false }),
+    db.from("athlete_profile").select("config").eq("id", "singleton").single(),
+  ]);
+  const aliases = ((prof?.config ?? {}) as any).exercise_aliases ?? {};
+  const normName = (n: string) =>
+    n.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+
   for (const r of rows) {
     const key = dateKeyFromIso(r.logged_at);
     if (!workoutsByDay[key]) workoutsByDay[key] = [];
@@ -75,6 +88,23 @@ export async function CalendarView() {
       reps: safeNumber(r.reps),
       weight: safeNumber(r.weight),
       logged_at: String(r.logged_at),
+    });
+  }
+
+  for (const r of pasted ?? []) {
+    const key = r.day as string;
+    if (!workoutsByDay[key]) workoutsByDay[key] = [];
+    workoutsByDay[key].push({
+      // "as:" marks the row as coming from athlete_sets, so deleting one
+      // knows which table to delete from.
+      id: `as:${r.id}`,
+      exercise_id: 0,
+      exercise_name: r.exercise as string,
+      primary_muscle: aliases[normName(r.exercise as string)]?.primary_muscle ?? "",
+      sets: safeNumber(r.sets),
+      reps: safeNumber(r.reps),
+      weight: safeNumber(r.weight),
+      logged_at: `${r.day}T12:00:00.000Z`,
     });
   }
 

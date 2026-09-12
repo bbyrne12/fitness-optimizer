@@ -105,6 +105,16 @@ export async function logWorkout(payload: {
 export async function deleteWorkoutLog(logId: string): Promise<{ error?: string }> {
   if (!logId) return { error: "Missing log id" };
 
+  // Rows typed into the paste box live in athlete_sets and are marked "as:".
+  if (logId.startsWith("as:")) {
+    const { admin } = await import("@/lib/athlete/supabase");
+    const { error } = await admin()
+      .from("athlete_sets").delete().eq("id", Number(logId.slice(3)));
+    if (error) return { error: error.message };
+    revalidatePath("/log-workout");
+    return {};
+  }
+
   try {
     const { supabase, user, error: authError } = await getAuthedUser();
     if (authError || !user) return { error: authError ?? "Not authenticated" };
