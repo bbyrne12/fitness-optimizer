@@ -5,11 +5,14 @@
  * one-time code for the athlete's first token pair, and stores it against
  * their account. From then on only the morning job refreshes it.
  */
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
 import { connect, whoopRedirectUri, WHOOP_STATE_COOKIE } from "@/lib/athlete/whoop";
 import { saveWhoopSummary } from "@/lib/athlete/summary";
+
+// Reading a whole WHOOP history after the redirect takes longer than the default.
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   const url = req.nextUrl;
@@ -32,11 +35,12 @@ export async function GET(req: NextRequest) {
 
   try {
     const at = await connect(user.id, code, whoopRedirectUri(url.origin));
-    // Read their history once now, so the setup page can show what each of
-    // their sports costs them before the first morning email. A failure here
-    // does not undo the connection; the morning job fills it in later.
-    await saveWhoopSummary(user.id, at).catch((e) =>
-      console.error("[whoop callback] summary:", e instanceof Error ? e.message : e));
+    // Measuring every sport means reading their whole WHOOP history -- dozens
+    // of requests -- so it runs after the redirect instead of holding it up.
+    // A failure here does not undo the connection; the morning job adds recent
+    // days on its own.
+    after(() => saveWhoopSummary(user.id, at).catch((e) =>
+      console.error("[whoop callback] summary:", e instanceof Error ? e.message : e)));
     return back("connected");
   } catch (e) {
     console.error("[whoop callback]", e instanceof Error ? e.message : e);

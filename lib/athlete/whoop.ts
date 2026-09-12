@@ -167,6 +167,17 @@ async function page(path: string, at: string, cap = 400) {
   }
 }
 
+/**
+ * Recovery and workouts as far back as WHOOP has them (up to about two years),
+ * for measuring what each sport costs. It is dozens of requests, one page at a
+ * time so as not to trip WHOOP's rate limit, so it runs once, on connecting.
+ */
+export async function pullHistory(at: string) {
+  const recovery = await page("/v2/recovery", at, 750);
+  const workouts = await page("/v2/activity/workout", at, 750);
+  return { recovery, workouts };
+}
+
 /** Height, weight and max heart rate, as WHOOP has them. */
 export async function body(at: string) {
   return get("/v2/user/measurement/body", at) as Promise<{ max_heart_rate?: number }>;

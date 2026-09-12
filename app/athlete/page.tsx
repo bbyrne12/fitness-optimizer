@@ -18,7 +18,7 @@ export const metadata = { title: "Athlete setup" };
 const NOTICES: Record<string, { ok: boolean; text: string }> = {
   connected: {
     ok: true,
-    text: "WHOOP is connected. Your sports and what each one costs you are below; the first morning email goes out once WHOOP scores your next recovery.",
+    text: "WHOOP is connected. Your history is being read now: refresh in a minute to see what each of your sports costs you. The first morning email goes out once WHOOP scores your next recovery.",
   },
   denied: { ok: false, text: "WHOOP access was not approved, so nothing was connected." },
   state: {

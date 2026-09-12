@@ -21,7 +21,7 @@ import {
   buildState, racePlan, weekTemplate, decide, prescribe,
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
   runConsistencyWeeks, readiness, mesocycle, personalFrom, planInputs,
-  whoopSportSummary, activityCosts,
+  whoopSportDays, mergeSportDays, summarizeSportDays, activityCosts,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
@@ -200,10 +200,13 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
   const latestSleep = [...(w.sleep as any[])]
     .sort((a, b) => String(b.start).localeCompare(String(a.start)))[0];
   const offset = offsetMinutes(latestSleep?.timezone_offset) ?? cfg.utc_offset_minutes ?? 0;
-  // What each sport costs this athlete, measured from their own history. Kept
-  // on the profile, at most once a day, so the setup page and calendar can
-  // show it without calling WHOOP themselves.
-  const sports = whoopSportSummary(w);
+  // What each sport costs this athlete, measured from their own history. This
+  // pull only reaches back a few months, so recent days are added to what is
+  // already measured rather than replacing it -- otherwise a sport played in
+  // spring would drop out of its own cost by autumn. Kept on the profile, at
+  // most once a day, so the setup page and calendar never call WHOOP.
+  const sportDays = mergeSportDays(cfg.whoop_summary?.sport_days ?? {}, whoopSportDays(w));
+  const sports = summarizeSportDays(sportDays);
   if (offset !== cfg.utc_offset_minutes || cfg.whoop_summary?.updated !== state.date) {
     const measured = cfg.whoop_summary?.max_heart_rate ? null : await body(at).catch(() => null);
     await db.from("athlete_profile").update({ config: {
@@ -212,6 +215,7 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
       whoop_summary: {
         ...(cfg.whoop_summary ?? {}),
         updated: state.date,
+        sport_days: sportDays,
         sports,
         resting_heart_rate: state.rhr ?? null,
         ...(measured?.max_heart_rate ? { max_heart_rate: measured.max_heart_rate } : {}),

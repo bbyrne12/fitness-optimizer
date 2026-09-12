@@ -249,59 +249,80 @@ const MIN_MEASURED = 5;
 /** Stand-in costs, by how hard the athlete rates the activity. */
 export const INTENSITY_COST: Record<Intensity, number> = { easy: -1, moderate: -3, hard: -5 };
 
+/** Per sport, each day it was done: the next-morning residual when that day
+ *  can be measured, null when it cannot (another real session the same day,
+ *  or no recovery score the next morning). */
+export type SportDays = Record<string, Record<string, number | null>>;
+
 /**
- * Every sport in an athlete's WHOOP history, with what it costs them: the
- * next morning's recovery after days they did it, against what mean reversion
- * alone predicts (a bad morning tends to be followed by a better one and the
- * reverse, whatever happened in between). Only days where that sport was the
- * one real session count, so a run and a match on the same day are not blamed
- * on either.
+ * Every sport in a stretch of WHOOP history, with what it cost on each day:
+ * the next morning's recovery against what mean reversion alone predicts (a
+ * bad morning tends to be followed by a better one and the reverse, whatever
+ * happened in between). Only days where that sport was the one real session
+ * are measured, so a run and a match on the same day are not blamed on either.
  */
-export function whoopSportSummary(w: Rec) {
+export function whoopSportDays(w: Rec): SportDays {
   const rec: Record<string, number> = {};
   for (const r of w.recovery ?? [])
     if (r.score?.recovery_score != null) rec[localDay(r.created_at)] = r.score.recovery_score;
 
   const sportsByDay: Record<string, Set<string>> = {};
-  const sessions: Record<string, number> = {};
-  for (const x of w.workouts ?? []) {
-    if (!x.sport_name) continue;
-    const sport = String(x.sport_name);
-    sessions[sport] = (sessions[sport] ?? 0) + 1;
-    (sportsByDay[localDay(x.start, x.timezone_offset)] ??= new Set()).add(sport);
-  }
+  for (const x of w.workouts ?? [])
+    if (x.sport_name)
+      (sportsByDay[localDay(x.start, x.timezone_offset)] ??= new Set()).add(String(x.sport_name));
 
   const pairs: [number, number][] = [];
   for (const d of Object.keys(rec))
     if (rec[shift(d, 1)] != null) pairs.push([rec[d], rec[shift(d, 1)]]);
 
-  const residuals: Record<string, number[]> = {};
+  let predict: ((today: number) => number) | null = null;
   if (pairs.length >= 20) {
     const mx = mean(pairs.map((p) => p[0]));
     const my = mean(pairs.map((p) => p[1]));
     const sxx = pairs.reduce((a, [x]) => a + (x - mx) ** 2, 0);
     const slope = sxx ? pairs.reduce((a, [x, y]) => a + (x - mx) * (y - my), 0) / sxx : 0;
-    const intercept = my - slope * mx;
-    for (const [d, sports] of Object.entries(sportsByDay)) {
-      const real = [...sports].filter((s) => !BACKGROUND.has(s));
-      const next = rec[shift(d, 1)];
-      if (real.length !== 1 || rec[d] == null || next == null) continue;
-      (residuals[real[0]] ??= []).push(next - (slope * rec[d] + intercept));
-    }
+    predict = (today) => slope * today + (my - slope * mx);
   }
 
-  return Object.entries(sessions)
-    .filter(([sport]) => !BACKGROUND.has(sport))
-    .map(([sport, count]) => {
-      const res = residuals[sport] ?? [];
+  const out: SportDays = {};
+  for (const [d, sports] of Object.entries(sportsByDay)) {
+    const real = [...sports].filter((s) => !BACKGROUND.has(s));
+    const next = rec[shift(d, 1)];
+    const measurable = predict && real.length === 1 && rec[d] != null && next != null;
+    for (const s of real)
+      (out[s] ??= {})[d] = measurable ? Math.round((next - predict!(rec[d])) * 10) / 10 : null;
+  }
+  return out;
+}
+
+/** Joins two stretches of history. A measured day beats an unmeasured one, and
+ *  a newer measurement of the same day beats an older one. */
+export function mergeSportDays(older: SportDays, newer: SportDays): SportDays {
+  const out: SportDays = {};
+  for (const src of [older, newer])
+    for (const [sport, days] of Object.entries(src ?? {}))
+      for (const [d, v] of Object.entries(days ?? {}))
+        if (v != null || out[sport]?.[d] == null) (out[sport] ??= {})[d] = v;
+  return out;
+}
+
+/** Per sport: days done, days measured, and the cost once enough are measured. */
+export function summarizeSportDays(days: SportDays) {
+  return Object.entries(days)
+    .map(([sport, byDay]) => {
+      const res = Object.values(byDay).filter((v): v is number => v != null);
       return {
         sport,
-        sessions: count,
+        sessions: Object.keys(byDay).length,
         n: res.length,
         cost: res.length >= MIN_MEASURED ? Math.round(mean(res) * 10) / 10 : null,
       };
     })
     .sort((a, b) => b.sessions - a.sessions);
+}
+
+export function whoopSportSummary(w: Rec) {
+  return summarizeSportDays(whoopSportDays(w));
 }
 
 /**
