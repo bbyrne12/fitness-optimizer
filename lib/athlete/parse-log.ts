@@ -30,7 +30,13 @@ export type ParsedSet = {
   notes: string | null;
 };
 
-const DATE_RE = /^(\d{1,2})\/(\d{1,2}):?\s*$/;
+// Forgiving on purpose: this gets typed one-handed on a phone after a
+// workout. 9/14, 9/14:, 9/14/26, 9-14, "Sept 14" and "September 14th" all
+// mean the same thing, and none of them should cost him a lost session.
+const DATE_RE = /^(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?:?\s*$/;
+const MONTHS = ["jan","feb","mar","apr","may","jun",
+                "jul","aug","sep","oct","nov","dec"];
+const WORD_DATE_RE = /^([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})?:?\s*$/i;
 const YEAR_RE = /^Workouts\s+(\d{2})\s*$/i;
 const MULT_RE = /^[Xx](\d+):?\s*$/;
 const PIN_RE = /(\d+)(?:st|nd|rd|th)\s+from\s+(top|bottom)/i;
@@ -46,17 +52,23 @@ const SKIP = ["ab workout", "resistance band", "bands", "superset", "explosive",
 
 export type ParseResult = {
   sets: ParsedSet[];
+  /** False when the date was assumed rather than written. */
+  dated: boolean;
   days: number;
   unparsed: string[];
   years: number[];
 };
 
-export function parseLog(text: string, fallbackYear?: number): ParseResult {
+export function parseLog(text: string, fallbackYear?: number,
+                         defaultDay?: string): ParseResult {
   const out: ParsedSet[] = [];
   const unparsed: string[] = [];
   const years = new Set<number>();
   let year = fallbackYear ?? new Date().getFullYear();
-  let day: string | null = null;
+  // No date line at all means "this is today" -- the common case when logging
+  // straight after a session.
+  let day: string | null = defaultDay ?? null;
+  let sawDate = false;
   let mult = 1;
 
   for (const raw of text.split(/\r?\n/)) {
@@ -69,11 +81,29 @@ export function parseLog(text: string, fallbackYear?: number): ParseResult {
     const dm = DATE_RE.exec(s);
     if (dm) {
       const mo = parseInt(dm[1]), dy = parseInt(dm[2]);
-      const d = new Date(Date.UTC(year, mo - 1, dy));
+      let yr = year;
+      if (dm[3]) {
+        const n = parseInt(dm[3]);
+        yr = n < 100 ? 2000 + n : n;
+      }
+      const d = new Date(Date.UTC(yr, mo - 1, dy));
       day = d.getUTCMonth() === mo - 1 ? d.toISOString().slice(0, 10) : null;
-      if (day) years.add(year);
+      if (day) { years.add(yr); sawDate = true; }
       mult = 1;
       continue;
+    }
+
+    const wm = WORD_DATE_RE.exec(s);
+    if (wm) {
+      const mi = MONTHS.indexOf(wm[1].slice(0, 3).toLowerCase());
+      if (mi >= 0) {
+        const yr = wm[3] ? parseInt(wm[3]) : year;
+        const d = new Date(Date.UTC(yr, mi, parseInt(wm[2])));
+        day = d.getUTCMonth() === mi ? d.toISOString().slice(0, 10) : null;
+        if (day) { years.add(yr); sawDate = true; }
+        mult = 1;
+        continue;
+      }
     }
 
     const mm = MULT_RE.exec(s);
@@ -129,6 +159,7 @@ export function parseLog(text: string, fallbackYear?: number): ParseResult {
 
   return {
     sets: out,
+    dated: sawDate,
     days: new Set(out.map((r) => r.day)).size,
     unparsed,
     years: [...years].sort(),

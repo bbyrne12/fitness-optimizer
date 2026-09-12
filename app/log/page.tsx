@@ -26,9 +26,10 @@ export default function LogPage() {
       </p>
       <h1 className="mt-2 text-2xl font-semibold">Paste from Notes</h1>
       <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-        Exactly the format you already write. Date line, then exercises.
-        Pasting the same day again replaces it, so there is no harm in pasting
-        the whole week — or the whole month.
+        Exactly the format you already write. Skip the date and it files under
+        today; write one — 9/14, 9/14/26, 9-14 or Sept 14 all work — to log
+        another day. Re-saving a day replaces it, so pasting the whole week is
+        safe.
       </p>
 
       <form action={action} className="mt-6 flex flex-col gap-3">

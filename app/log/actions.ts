@@ -25,13 +25,16 @@ export async function saveLog(
   if (!text) return { ok: false, message: "Nothing pasted." };
 
   const year = Number(form.get("year")) || new Date().getFullYear();
-  const { sets, unparsed } = parseLog(text, year);
+  // Local "today" (America/New_York), so a session typed at 9pm does not land
+  // on tomorrow's date.
+  const today = new Date(Date.now() - 240 * 60_000).toISOString().slice(0, 10);
+  const { sets, unparsed, dated } = parseLog(text, year, today);
 
   if (!sets.length) {
     return {
       ok: false,
       message:
-        "No sessions found. Each session needs a date line like \"9/14:\" above its exercises.",
+        "Nothing to save. Lines need to look like \"Leg press: 320 x 12\".",
       unparsed: unparsed.slice(0, 8),
     };
   }
@@ -55,7 +58,10 @@ export async function saveLog(
   revalidatePath("/calendar");
   return {
     ok: true,
-    message: `Saved ${sets.length} sets across ${days.length} ${days.length === 1 ? "session" : "sessions"}.`,
+    message:
+      `Saved ${sets.length} sets across ${days.length} ` +
+      `${days.length === 1 ? "session" : "sessions"}.` +
+      (dated ? "" : ` No date written, so it was filed under today.`),
     days, sets: sets.length,
     unparsed: unparsed.slice(0, 8),
   };
