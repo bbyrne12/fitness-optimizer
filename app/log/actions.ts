@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { admin } from "@/lib/athlete/supabase";
-import { isAthleteOwner } from "@/lib/athlete/owner";
+
+import { createClient } from "@/lib/supabase/server";
 import { parseLog } from "@/lib/athlete/parse-log";
 import { resolveExercises, norm, type AliasMap } from "@/lib/athlete/resolve-exercises";
 
@@ -17,27 +17,30 @@ export type SaveResult = {
 };
 
 /**
- * Paste in whatever is in Notes; this reads the typed format and writes it
- * to Supabase. Re-pasting the same days replaces them rather than duplicating,
- * so pasting the whole month again is safe.
+ * Paste in whatever is in Notes; this reads the typed format and writes it to
+ * the signed-in athlete's log. Re-pasting the same days replaces them rather
+ * than duplicating, so pasting the whole month again is safe.
+ *
+ * Runs on the athlete's own session, so row-level security confines every read
+ * and write to their rows; the user_id filters say the same thing explicitly.
  */
 export async function saveLog(
   _prev: SaveResult | null,
   form: FormData,
 ): Promise<SaveResult> {
-  // Writes to one person's athlete_sets with the service role key.
-  if (!(await isAthleteOwner())) return { ok: false, message: "Not authorised." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, message: "Sign in to save a workout." };
 
   const text = String(form.get("log") ?? "").trim();
   if (!text) return { ok: false, message: "Nothing pasted." };
 
   const year = Number(form.get("year")) || new Date().getFullYear();
-  // The athlete's local "today", so a session typed at 9pm does not land on
-  // tomorrow's date. The UTC offset is profile data.
-  const db = admin();
-  const { data: prof } = await db
-    .from("athlete_profile").select("config").eq("id", "singleton").single();
+  const { data: prof } = await supabase
+    .from("athlete_profile").select("config").eq("user_id", user.id).maybeSingle();
   const cfg = (prof?.config ?? {}) as Record<string, any>;
+  // The athlete's local "today", so a session typed at 9pm does not land on
+  // tomorrow's date. The offset is learned from their WHOOP records.
   const today = new Date(Date.now() + (cfg.utc_offset_minutes ?? 0) * 60_000)
     .toISOString().slice(0, 10);
   const { sets, unparsed, dated } = parseLog(text, year, today);
@@ -55,7 +58,8 @@ export async function saveLog(
 
   // Replace the pasted days outright: pasting a corrected day should fix it,
   // not add a second copy of it.
-  const { error: delErr } = await db.from("athlete_sets").delete().in("day", days);
+  const { error: delErr } = await supabase
+    .from("athlete_sets").delete().eq("user_id", user.id).in("day", days);
   if (delErr) return { ok: false, message: `Could not clear those days: ${delErr.message}` };
 
   // Work out what the typed names mean before saving, so anything unmatched
@@ -63,14 +67,15 @@ export async function saveLog(
   const aliases = (cfg.exercise_aliases ?? {}) as AliasMap;
 
   const { map, added } = await resolveExercises(
-    sets.map((s) => s.exercise), db, aliases);
+    sets.map((s) => s.exercise), supabase, aliases);
 
   if (Object.keys(added).length) {
-    await db.from("athlete_profile").upsert({
-      id: "singleton",
-      config: { ...cfg, exercise_aliases: map },
-      updated_at: new Date().toISOString(),
-    });
+    const { error: profErr } = await supabase.from("athlete_profile").upsert(
+      { user_id: user.id, config: { ...cfg, exercise_aliases: map },
+        updated_at: new Date().toISOString() },
+      { onConflict: "user_id" },
+    );
+    if (profErr) console.error("[saveLog] could not store exercise matches:", profErr.message);
   }
 
   const matched = [...new Set(sets.map((s) => s.exercise))].map((name) => {
@@ -82,8 +87,9 @@ export async function saveLog(
     };
   });
 
-  const { error: insErr } = await db.from("athlete_sets").insert(
+  const { error: insErr } = await supabase.from("athlete_sets").insert(
     sets.map((s) => ({
+      user_id: user.id,
       day: s.day, exercise: s.exercise, weight: s.weight,
       reps: s.reps, sets: s.sets, pin: s.pin,
     })),

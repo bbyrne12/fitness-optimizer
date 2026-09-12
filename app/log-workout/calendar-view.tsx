@@ -1,8 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
-import { admin } from "@/lib/athlete/supabase";
-import { athleteOwnerId } from "@/lib/athlete/owner";
 
 import { CalendarGrid } from "./calendar-grid";
+
+type Db = Awaited<ReturnType<typeof createClient>>;
 
 type LogJoinRow = {
   id: string;
@@ -28,16 +28,16 @@ function safeNumber(n: unknown, fallback = 0) {
   return Number.isFinite(x) ? x : fallback;
 }
 
-// PostgREST caps a response at 1000 rows, and the imported history is already
-// 974. Page through rather than silently losing the oldest sessions the first
-// time the log crosses that line.
-async function allSets(db: ReturnType<typeof admin>) {
+// PostgREST caps a response at 1000 rows, and a few years of training history
+// passes that. Page through rather than silently losing the oldest sessions.
+async function allSets(db: Db, userId: string) {
   const PAGE = 1000;
   const out: Array<Record<string, unknown>> = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await db
       .from("athlete_sets")
       .select("id,day,exercise,weight,reps,sets")
+      .eq("user_id", userId)
       .order("day", { ascending: false })
       .range(from, from + PAGE - 1);
     if (error || !data?.length) break;
@@ -55,12 +55,13 @@ export async function CalendarView() {
 
   if (!user) return null;
 
-  // No date window. The calendar pages back through years, and the whole
-  // history is ~1k sets -- small enough to hand over at once, and the only way
-  // January 2024 isn't a wall of empty boxes.
+  // No date window. The calendar pages back through years, and a whole
+  // history is small enough to hand over at once -- the only way the oldest
+  // months aren't a wall of empty boxes.
   const { data, error } = await supabase
     .from("workout_logs")
     .select("id, exercise_id, sets, reps, weight, logged_at, exercises(name, primary_muscle)")
+    .eq("user_id", user.id)
     .order("logged_at", { ascending: false });
 
   const rows = error ? [] : ((data ?? []) as unknown as LogJoinRow[]);
@@ -81,20 +82,13 @@ export async function CalendarView() {
 
   // Sessions typed into the paste box live in athlete_sets, which has no
   // exercise_id -- the name is the name. They are merged in here so one
-  // calendar shows everything, however it was entered.
-  // athlete_sets is one person's history, read with the service role key, so it
-  // is only merged in for that person. Everyone else sees their own logs only.
-  let pasted: Array<Record<string, unknown>> = [];
-  let aliases: Record<string, any> = {};
-  if (user.id === (await athleteOwnerId())) {
-    const db = admin();
-    const [sets, { data: prof }] = await Promise.all([
-      allSets(db),
-      db.from("athlete_profile").select("config").eq("id", "singleton").single(),
-    ]);
-    pasted = sets;
-    aliases = ((prof?.config ?? {}) as any).exercise_aliases ?? {};
-  }
+  // calendar shows everything, however it was entered. Both reads run on the
+  // athlete's own session, so row-level security keeps them to their own rows.
+  const [pasted, { data: prof }] = await Promise.all([
+    allSets(supabase, user.id),
+    supabase.from("athlete_profile").select("config").eq("user_id", user.id).maybeSingle(),
+  ]);
+  const aliases = ((prof?.config ?? {}) as any).exercise_aliases ?? {};
   const normName = (n: string) =>
     n.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 
@@ -141,4 +135,3 @@ export async function CalendarView() {
 
   return <CalendarGrid initialWorkoutsByDay={workoutsByDay} />;
 }
-

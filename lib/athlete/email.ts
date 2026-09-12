@@ -84,7 +84,7 @@ export function renderEmail(opts: {
 </div></div>`;
 }
 
-export async function sendEmail(subject: string, html: string) {
+export async function sendEmail(to: string, subject: string, html: string) {
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -94,8 +94,10 @@ export async function sendEmail(subject: string, html: string) {
       "User-Agent": "athlete-os/1.0",
     },
     body: JSON.stringify({
+      // Resend's test sender only delivers to the Resend account's own address.
+      // Emailing anyone else needs EMAIL_FROM on a domain verified with Resend.
       from: process.env.EMAIL_FROM ?? "Athlete OS <onboarding@resend.dev>",
-      to: [process.env.EMAIL_TO],
+      to: [to],
       subject,
       html,
     }),

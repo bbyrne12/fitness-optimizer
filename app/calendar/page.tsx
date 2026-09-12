@@ -6,10 +6,11 @@
  * refreshes tokens on every visit would fight the poller for the refresh.
  */
 import { Suspense } from "react";
-import { admin } from "@/lib/athlete/supabase";
+import Link from "next/link";
+
+import { createClient } from "@/lib/supabase/server";
 import { buildCalendar } from "@/lib/athlete/calendar";
 import { personalFrom } from "@/lib/athlete/decide";
-import { isAthleteOwner } from "@/lib/athlete/owner";
 
 export const metadata = { title: "Training calendar" };
 
@@ -18,6 +19,7 @@ const KIND_COLOR: Record<string, string> = {
   run: "bg-sky-400",
   "pull+run": "bg-sky-400",
   lacrosse: "bg-amber-400",
+  tennis: "bg-orange-400",
   legs: "bg-zinc-500",
   push: "bg-zinc-500",
   pull: "bg-zinc-500",
@@ -41,38 +43,35 @@ export default function CalendarPage() {
 }
 
 async function CalendarBody() {
-  // Built from one person's profile and decisions, read with the service role
-  // key. Anyone else who is signed in gets nothing from it.
-  if (!(await isAthleteOwner())) {
-    return (
-      <main className="mx-auto max-w-3xl px-5 py-16">
-        <h1 className="text-xl font-semibold">Nothing to show</h1>
-        <p className="mt-2 text-sm text-zinc-400">
-          The training plan is only available to the athlete it was built for.
-        </p>
-      </main>
-    );
-  }
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
 
-  const db = admin();
+  // Both reads run on the athlete's own session, so row-level security keeps
+  // them to their own profile and decisions.
   const [{ data: prof }, { data: log }] = await Promise.all([
-    db.from("athlete_profile").select("config").eq("id", "singleton").single(),
-    db.from("decision_log").select("day,decision").order("day", { ascending: false })
-      .limit(1).maybeSingle(),
+    supabase.from("athlete_profile").select("config").eq("user_id", user.id).maybeSingle(),
+    supabase.from("decision_log").select("day,decision").eq("user_id", user.id)
+      .order("day", { ascending: false }).limit(1).maybeSingle(),
   ]);
 
-  if (!prof) {
+  const cfg = (prof?.config ?? null) as Record<string, any> | null;
+  if (!cfg?.race?.date) {
     return (
       <main className="mx-auto max-w-3xl px-5 py-16">
-        <h1 className="text-xl font-semibold">Nothing to show yet</h1>
+        <h1 className="text-xl font-semibold">No training plan yet</h1>
         <p className="mt-2 text-sm text-zinc-400">
-          The athlete profile has not been pushed to Supabase.
+          Set a race date and connect WHOOP, and the plan builds itself from there.
         </p>
+        <Link
+          href="/athlete"
+          className="mt-5 inline-block rounded-md bg-lime-400 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-lime-300"
+        >
+          Set up your training
+        </Link>
       </main>
     );
   }
-
-  const cfg = prof.config as Record<string, any>;
   const decision = (log?.decision ?? null) as Record<string, any> | null;
   const today = decision?.state?.date ?? new Date().toISOString().slice(0, 10);
 
@@ -80,11 +79,11 @@ async function CalendarBody() {
     raceDate: cfg.race.date,
     today,
     recentLongMi: decision?.plan?.long_run_uncapped_mi ?? 3,
-    longestEver: cfg.race.longest_run_ever_mi,
-    lacrosseDays: cfg.lacrosse.days,
+    longestEver: cfg.race.longest_run_ever_mi ?? 0,
+    lacrosseDays: cfg.lacrosse?.days ?? [],
     tennisDays: (cfg as any).tennis?.days ?? [],
     personal: personalFrom(cfg),
-    z2: cfg.athlete.zone2_ceiling_bpm,
+    z2: cfg.athlete?.zone2_ceiling_bpm ?? 145,
     consistencyWeeks: decision?.readiness?.weeks ?? 0,
   });
 
@@ -103,10 +102,11 @@ async function CalendarBody() {
             Training calendar
           </p>
           <h1 className="mt-2 text-2xl font-semibold">
-            {weeks.length - 1} weeks to the half marathon
+            {weeks.length - 1} weeks to{" "}
+            {cfg.race.name ? `the ${String(cfg.race.name).toLowerCase()}` : "race day"}
           </h1>
           <p className="mt-1 text-sm text-zinc-400">
-            {cfg.race.date} · longest run ever {cfg.race.longest_run_ever_mi} mi
+            {cfg.race.date} · longest run ever {cfg.race.longest_run_ever_mi ?? 0} mi
           </p>
         </div>
         <div className="rounded-md border border-zinc-800 bg-zinc-900 px-4 py-3">

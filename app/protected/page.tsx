@@ -16,6 +16,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   CalendarDays,
   Dumbbell,
+  HeartPulse,
   Search,
   Sparkles,
   Star,
@@ -330,6 +331,22 @@ async function DashboardContent() {
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Card className="transition-colors hover:bg-accent">
+            <Link href="/athlete" className="block">
+              <CardHeader className="space-y-1">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-md border bg-background p-2">
+                    <HeartPulse className="h-5 w-5 text-primary" />
+                  </div>
+                  <CardTitle className="text-lg">Connect WHOOP</CardTitle>
+                </div>
+                <CardDescription>
+                  A training call every morning, based on your recovery.
+                </CardDescription>
+              </CardHeader>
+            </Link>
+          </Card>
+
           <Card className="transition-colors hover:bg-accent">
             <Link href="/log-workout" className="block">
               <CardHeader className="space-y-1">

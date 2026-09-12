@@ -29,9 +29,10 @@ equipment, weights selection toward the muscles flagged as underworked, and
 prescribes volume by experience level. Workouts are logged on a calendar, or
 pasted in as free text and parsed.
 
-**The morning decision.** A scheduled job hits `/api/morning`, which pulls last
-night's WHOOP recovery, sleep and strain, combines it with the training history,
-and emails a single decision: train or back off, which session, which exercises,
+**The morning decision.** Anyone can sign up and connect their own WHOOP account
+through OAuth on the setup page. A scheduled job hits `/api/morning`, which, for
+each connected athlete, pulls last night's WHOOP recovery, sleep and strain,
+combines it with their training history, and emails a single decision: train or back off, which session, which exercises,
 and what weight for each based on the last time that lift was performed. The
 engine (`lib/athlete/decide.ts`) is a pure function. Records and config in, a
 decision out, no fetching and no rendering, so it can be tested and read on its
@@ -56,14 +57,15 @@ the new job has proven itself. The reasoning is preserved in
 **WHOOP rotates its refresh token on every use and invalidates the old one
 immediately.** That makes concurrent refreshes a permanent lockout rather than a
 retryable error, so only one code path may refresh, and it must persist the new
-pair before using it. Tokens live in a single-row table with a check constraint
-enforcing the singleton, and only the morning route refreshes them. The
-local scripts that predate this are read-only now.
+pair before using it. Each athlete has one token row, reachable only with the
+service role key; the OAuth callback stores the first pair and after that only
+the morning route refreshes it.
 
-**Secrets and personal data stay out of a public repo.** The `athlete_*` tables
-have RLS enabled with no policies at all, so the anon and publishable keys
-cannot read them under any condition. Only the service role key can, and it
-lives in Vercel's environment.
+**Every athlete's data is fenced off from every other athlete's.** Each row in
+the `athlete_*` tables carries its owner's user id, and row-level security
+limits a signed-in user to their own rows. WHOOP tokens have no policy at all,
+so only the service role key, which lives in Vercel's environment, can read
+them.
 
 **The tunables are calibrated against data, and say so when the data is thin.**
 Each activity carries a recovery cost estimated from the athlete's own history.
@@ -84,6 +86,8 @@ can be traced to something other than an opinion.
 ```
 app/
   api/morning/route.ts   the daily decision endpoint (auth'd by CRON_SECRET)
+  api/whoop/             WHOOP OAuth connect and callback
+  athlete/               per-athlete setup: WHOOP connection and profile
   onboarding/            three-step profile wizard
   plan/ plans/           AI plan generation, plan list and detail
   log-workout/           calendar logging and free-text paste parsing
@@ -99,9 +103,10 @@ lib/
 db/migrations/           schema, applied via the Supabase SQL editor
 ```
 
-Data mutations are Server Actions rather than route handlers. Apart from
-Supabase's auth-confirm callback, `/api/morning` is the only route handler,
-because a scheduler needs a URL. Every user-facing table
+Data mutations are Server Actions rather than route handlers. Route handlers
+exist only where something outside the app needs a URL: the scheduler
+(`/api/morning`), WHOOP's OAuth redirect (`/api/whoop/*`) and Supabase's
+auth-confirm callback. Every user-facing table
 uses RLS scoped to `auth.uid()`.
 
 ## Running locally
@@ -119,12 +124,15 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 
 The app runs on those two alone. The morning decision additionally needs
 `SUPABASE_SERVICE_ROLE_KEY`, `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`,
-`RESEND_API_KEY`, `EMAIL_TO` and `CRON_SECRET`. Apply the files in
-`db/migrations/` in order via the Supabase SQL editor.
+`RESEND_API_KEY`, `EMAIL_FROM` and `CRON_SECRET`. Apply the files in
+`db/migrations/` in order via the Supabase SQL editor. Register
+`https://<your-domain>/api/whoop/callback` as a redirect URL on the WHOOP app
+(or set `WHOOP_REDIRECT_URI`). `EMAIL_FROM` must be on a domain verified with
+Resend: its test sender only delivers to the Resend account's own address.
 
-Everything specific to one athlete lives in the `athlete_profile` row, not in
-the code: race date, sport days and times, time zone, zone 2 ceiling, the
-owner's user id (`owner_user_id`), per-session cues, lifts to keep off
+Everything specific to an athlete lives in their `athlete_profile` row, set from
+the setup page rather than the code: race date, sport days and times, zone 2
+ceiling, email address, per-session cues, lifts to keep off
 automatic progression (`manual_lifts`), replacement "add today" exercises
 (`additions`), a measured cadence, and overrides for any tunable. The recovery
 costs in `DEFAULT_TUNABLES` were calibrated on one athlete's WHOOP history and

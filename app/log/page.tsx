@@ -1,25 +1,15 @@
-import { Suspense } from "react";
-import { redirect } from "next/navigation";
-
 import { AppNav } from "@/components/app-nav";
 import { PasteLog } from "@/components/paste-log";
-import { isAthleteOwner } from "@/lib/athlete/owner";
 
-// The paste box writes to one person's athlete_sets; nobody else has a use for it.
-async function OwnerOnly() {
-  if (!(await isAthleteOwner())) redirect("/log-workout");
-  return <PasteLog />;
-}
-
+// Signed-in only (the proxy redirects anyone else), and the save action writes
+// to the signed-in athlete's own log.
 export default function LogPage() {
   return (
     <>
       <AppNav />
       <main className="min-h-screen w-full px-4 py-10">
         <div className="mx-auto w-full max-w-2xl">
-          <Suspense fallback={null}>
-            <OwnerOnly />
-          </Suspense>
+          <PasteLog />
         </div>
       </main>
     </>
