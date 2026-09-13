@@ -1,10 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import { parseLog } from "@/lib/athlete/parse-log";
-import { resolveExercises, norm, type AliasMap } from "@/lib/athlete/resolve-exercises";
+import { resolveExercises, type AliasMap } from "@/lib/athlete/resolve-exercises";
 
 export type SaveResult = {
   ok: boolean;
@@ -12,8 +13,6 @@ export type SaveResult = {
   days?: string[];
   sets?: number;
   unparsed?: string[];
-  /** What each new exercise name was matched to, and how. */
-  matched?: { name: string; muscle: string; source: string }[];
 };
 
 /**
@@ -78,15 +77,6 @@ export async function saveLog(
     if (profErr) console.error("[saveLog] could not store exercise matches:", profErr.message);
   }
 
-  const matched = [...new Set(sets.map((s) => s.exercise))].map((name) => {
-    const r = map[norm(name)];
-    return {
-      name,
-      muscle: r?.primary_muscle || "no match",
-      source: r?.source ?? "unresolved",
-    };
-  });
-
   const { error: insErr } = await supabase.from("athlete_sets").insert(
     sets.map((s) => ({
       user_id: user.id,
@@ -98,14 +88,7 @@ export async function saveLog(
 
   revalidatePath("/calendar");
   revalidatePath("/log-workout");
-  return {
-    ok: true,
-    message:
-      `Saved ${sets.length} sets across ${days.length} ` +
-      `${days.length === 1 ? "session" : "sessions"}.` +
-      (dated ? "" : ` No date written, so it was filed under today.`),
-    days, sets: sets.length,
-    unparsed: unparsed.slice(0, 8),
-    matched,
-  };
+  // Saved: back to the journal, which now shows it. Only a failure stays on
+  // the paste box, so the text is still there to fix.
+  redirect(`/log-workout?saved=${sets.length}&days=${days.length}${dated ? "" : "&today=1"}`);
 }

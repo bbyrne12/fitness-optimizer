@@ -133,5 +133,9 @@ export async function CalendarView() {
     });
   }
 
-  return <CalendarGrid initialWorkoutsByDay={workoutsByDay} />;
+  // The grid keeps the data in state, so it is keyed on what it was given:
+  // a refresh after a save remounts it rather than showing the old month.
+  const dataKey = Object.values(workoutsByDay).reduce((n, w) => n + w.length, 0)
+    + ":" + Object.keys(workoutsByDay).sort().pop();
+  return <CalendarGrid key={dataKey} initialWorkoutsByDay={workoutsByDay} />;
 }
