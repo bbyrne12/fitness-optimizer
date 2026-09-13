@@ -38,10 +38,23 @@ async function JournalContent() {
   );
 }
 
-export default async function LogWorkoutPage({ searchParams }: {
-  searchParams: Promise<{ saved?: string; days?: string; today?: string }>;
-}) {
+type Params = Promise<{ saved?: string; days?: string; today?: string }>;
+
+// Reads the URL, so it renders inside the Suspense boundary with the journal
+// rather than holding up the whole page.
+async function SavedBanner({ searchParams }: { searchParams: Params }) {
   const { saved, days, today } = await searchParams;
+  if (!saved) return null;
+  const n = Number(days) || 1;
+  return (
+    <p className="rounded-md border border-lime-400/40 bg-lime-400/5 px-4 py-2 text-sm text-lime-200">
+      Saved {saved} sets across {n} {n === 1 ? "session" : "sessions"}.
+      {today ? " No date written, so it was filed under today." : ""}
+    </p>
+  );
+}
+
+export default function LogWorkoutPage({ searchParams }: { searchParams: Params }) {
   return (
     <>
       <AppNav />
@@ -56,14 +69,8 @@ export default async function LogWorkoutPage({ searchParams }: {
             </p>
           </header>
 
-          {saved && (
-            <p className="rounded-md border border-lime-400/40 bg-lime-400/5 px-4 py-2 text-sm text-lime-200">
-              Saved {saved} sets across {days ?? 1} {days === "1" || !days ? "session" : "sessions"}.
-              {today ? " No date written, so it was filed under today." : ""}
-            </p>
-          )}
-
           <Suspense fallback={<JournalSkeleton />}>
+            <SavedBanner searchParams={searchParams} />
             <JournalContent />
           </Suspense>
         </div>
