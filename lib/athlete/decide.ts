@@ -167,6 +167,8 @@ export type Personal = {
   additions: Record<string, [string, string, string]>;
   cadenceSpm: number | null;
   goals: Goal[];
+  /** Muscle groups the athlete wants to bring up; steers the "add today" pick. */
+  focusMuscles: string[];
   activities: Activity[];
   /** What each activity costs this athlete; filled in with activityCosts(). */
   activityCosts: Record<string, ActivityCost>;
@@ -192,6 +194,7 @@ export function personalFrom(cfg: Record<string, any>): Personal {
     additions,
     cadenceSpm: typeof cfg.cadence_spm === "number" ? cfg.cadence_spm : null,
     goals: inputs.goals,
+    focusMuscles: Array.isArray(cfg.focus_muscles) ? cfg.focus_muscles.map(String) : [],
     activities: inputs.activities,
     activityCosts: {},
   };
@@ -910,6 +913,39 @@ const ADDITIONS: Record<string, [string, string, string]> = {
     "and it hits calves, core and shins at once."],
 };
 
+/** Muscle groups an athlete can ask to bring up, each with the extra exercise
+ *  that does it and the session kinds it belongs in ("*" = any day). */
+export const FOCUS_MUSCLES = ["chest", "back", "shoulders", "arms", "core", "glutes", "quads", "hamstrings", "calves"] as const;
+const FOCUS_ADDITIONS: Record<string, { fits: string[]; add: [string, string, string] }> = {
+  chest: { fits: ["push", "upper", "full body"],
+    add: ["Incline dumbbell press", "3 x 10", "Upper chest, the part flat pressing leaves behind. One of your focus areas."] },
+  back: { fits: ["pull", "upper", "full body"],
+    add: ["Lat pulldowns", "3 x 12", "A vertical pull for width. One of your focus areas."] },
+  shoulders: { fits: ["push", "upper", "full body"],
+    add: ["Lateral raises", "3 x 15", "Side delts: the part pressing does not build. One of your focus areas."] },
+  arms: { fits: ["pull", "push", "upper", "full body"],
+    add: ["Curls and pressdowns, superset", "3 x 12 each", "Direct arm work. One of your focus areas."] },
+  core: { fits: ["*"],
+    add: ["Ab circuit", "10 min", "Core is one of your focus areas, and it fits on any day."] },
+  glutes: { fits: ["legs", "full body"],
+    add: ["Hip thrusts", "3 x 12", "Glutes: the biggest muscle in the body and the least trained by machines. One of your focus areas."] },
+  quads: { fits: ["legs", "full body"],
+    add: ["Leg extensions", "3 x 15", "Isolated quad volume. One of your focus areas."] },
+  hamstrings: { fits: ["legs", "full body"],
+    add: ["Romanian deadlift", "3 x 10", "Hamstrings at length, which most leg days skip. One of your focus areas."] },
+  calves: { fits: ["*"],
+    add: ["Calf raises", "3 x 25", "Calves are one of your focus areas, and they fit on any day."] },
+};
+
+/** The first focus muscle whose addition belongs in today's session, if any. */
+function focusAddition(focus: string[], planned: string, lift: string | null) {
+  for (const m of focus) {
+    const f = FOCUS_ADDITIONS[m];
+    if (f && f.fits.some((k) => k === "*" || k === planned || k === lift)) return f.add;
+  }
+  return null;
+}
+
 export function prescribe(sets: LoggedSet[], planned: string, level: string,
                           z2: number, longMi: number, opts: {
                             hrvStreak?: number; intervalsReady?: boolean;
@@ -963,7 +999,10 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
       hasEasyRun(planned))
     items.push("Strides — 6 x 20s fast, full recovery between");
 
-  let add = personal.additions[planned] ?? ADDITIONS[planned] ?? ADDITIONS[lift ?? ""];
+  // A profile's own additions win, then a focus muscle that fits today, then the defaults.
+  let add = personal.additions[planned]
+    ?? focusAddition(personal.focusMuscles, planned, lift)
+    ?? ADDITIONS[planned] ?? ADDITIONS[lift ?? ""];
   // When HRV is the thing that is off, the breathing protocol outranks whatever
   // else was scheduled: after one low morning when HRV is the athlete's goal,
   // after two otherwise.

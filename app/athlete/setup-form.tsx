@@ -22,6 +22,20 @@ export type ActivityRow = {
 
 export type SportSeen = { sport: string; sessions: number; cost: number | null; n: number };
 
+/** What Claude took from the notes last time they were saved. */
+export type NotesRead = {
+  manual_lifts: string[];
+  cues: Record<string, string>;
+  summary: string | null;
+  morning_call: string | null;
+};
+
+const FOCUS: [string, string][] = [
+  ["chest", "Chest"], ["back", "Back"], ["shoulders", "Shoulders"], ["arms", "Arms"],
+  ["core", "Core"], ["glutes", "Glutes"], ["quads", "Quads"], ["hamstrings", "Hamstrings"],
+  ["calves", "Calves"],
+];
+
 export type SetupDefaults = {
   goals: string[];
   raceDistance: string;
@@ -33,8 +47,7 @@ export type SetupDefaults = {
   activities: ActivityRow[];
   zone2: number | string;
   longestRunMi: number | string;
-  /** Exact exercise names, as logged, that never get automatic increases. */
-  manualLifts: string[];
+  focusMuscles: string[];
   notes: string;
   emailTo: string;
 };
@@ -107,13 +120,12 @@ function costLine(seen: SportSeen | undefined) {
 
 const inWeekOrder = (days: string[]) => DAYS.filter((d) => days.includes(d));
 
-export function SetupForm({ defaults, accountEmail, sportsSeen, zone2Suggestion, liftNames }: {
+export function SetupForm({ defaults, accountEmail, sportsSeen, zone2Suggestion, notesRead }: {
   defaults: SetupDefaults;
   accountEmail: string;
   sportsSeen: SportSeen[];
   zone2Suggestion: number | null;
-  /** Every exercise name in the athlete's own log, for the manual-lifts picker. */
-  liftNames: string[];
+  notesRead: NotesRead | null;
 }) {
   const [result, action, pending] = useActionState<SetupResult | null, FormData>(
     saveAthleteProfile,
@@ -123,17 +135,7 @@ export function SetupForm({ defaults, accountEmail, sportsSeen, zone2Suggestion,
   const [distance, setDistance] = useState(defaults.raceDistance);
   const [rows, setRows] = useState<ActivityRow[]>(defaults.activities);
   const [zone2, setZone2] = useState(String(defaults.zone2));
-  const [manual, setManual] = useState<Set<string>>(() => {
-    // Saved values may be fragments from an older profile ("bench" for every
-    // bench variant); a name is pre-ticked if any saved value is part of it.
-    const picked = new Set<string>();
-    for (const name of liftNames)
-      if (defaults.manualLifts.some((m) => name.toLowerCase().includes(m.toLowerCase()))) picked.add(name);
-    return picked;
-  });
-  const unlisted = defaults.manualLifts
-    .filter((m) => !liftNames.some((n) => n.toLowerCase().includes(m.toLowerCase())))
-    .join(", ");
+  const [focus, setFocus] = useState<string[]>(defaults.focusMuscles);
 
   const seen = useMemo(() => new Map(sportsSeen.map((s) => [s.sport, s])), [sportsSeen]);
   const fromWhoop = sportsSeen.map((s) => s.sport).filter((s) => !EXCLUDED_SPORTS.has(s));
@@ -378,50 +380,56 @@ export function SetupForm({ defaults, accountEmail, sportsSeen, zone2Suggestion,
 
       <Question
         n={6}
-        title="Any lifts that should stay at their current weight?"
-        note="Something you're rehabbing or want to hold steady. The plan repeats these at the weight you last used and never suggests going up."
+        title="Which muscle groups are you trying to improve the most?"
+        note="Optional. The extra exercise added to each session leans toward these."
       >
-        {liftNames.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5">
-            {liftNames.map((name) => {
-              const on = manual.has(name);
-              return (
-                <label key={name} className={`cursor-pointer ${toggle(on)}`}>
-                  <input
-                    type="checkbox" name="manual_lift" value={name} checked={on}
-                    onChange={() => setManual((m) => {
-                      const next = new Set(m);
-                      if (next.has(name)) next.delete(name); else next.add(name);
-                      return next;
-                    })}
-                    className="sr-only"
-                  />
-                  {name}
-                </label>
-              );
-            })}
-          </div>
-        ) : (
-          <p className={hint}>Nothing logged yet. Once you have logged workouts, your lifts appear here to pick from.</p>
-        )}
-        <input
-          name="manual_lifts_extra" defaultValue={unlisted}
-          placeholder={liftNames.length ? "Any others, comma-separated" : "e.g. bench, overhead press"}
-          className={`${field} mt-3 w-full`}
-        />
+        <div className="flex flex-wrap gap-1.5">
+          {FOCUS.map(([id, label]) => {
+            const on = focus.includes(id);
+            return (
+              <label key={id} className={`cursor-pointer ${toggle(on)}`}>
+                <input
+                  type="checkbox" name="focus" value={id} checked={on}
+                  onChange={() => setFocus((f) => (on ? f.filter((x) => x !== id) : [...f, id]))}
+                  className="sr-only"
+                />
+                {label}
+              </label>
+            );
+          })}
+        </div>
       </Question>
 
       <Question
         n={7}
         title="Anything else about where you're trying to get to?"
-        note="Whatever the questions above don't cover: your history with this distance or sport and how it went, injuries or anything to work around, what you want to be true in six months if there's no race, and the one call you want the morning email to make for you."
+        note="Whatever the questions above don't cover: your history with this distance or sport and how it went, injuries or lifts to keep light, what you want to be true in six months if there's no race, and the one call you want the morning email to make for you."
       >
         <textarea
           name="notes" rows={7} maxLength={2000} defaultValue={defaults.notes}
           placeholder={NOTES_PLACEHOLDER}
           className={`${field} w-full leading-relaxed`}
         />
-        <p className={`${hint} mt-1.5`}>Shown with your training plan so it's read alongside these answers.</p>
+        <p className={`${hint} mt-1.5`}>
+          Read when you save: injuries become lifts the plan holds at their current weight, and
+          anything that affects a session type becomes a reminder on that day.
+        </p>
+        {notesRead && (
+          <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950/60 p-3">
+            <p className={small}>What the plan took from your notes</p>
+            <ul className="mt-1.5 flex flex-col gap-1 text-[12px] leading-relaxed text-zinc-300">
+              {notesRead.summary && <li>{notesRead.summary}</li>}
+              {notesRead.morning_call && <li>Morning call: {notesRead.morning_call}</li>}
+              <li>
+                Held at current weight:{" "}
+                {notesRead.manual_lifts.length ? notesRead.manual_lifts.join(", ") : "nothing"}
+              </li>
+              {Object.entries(notesRead.cues).map(([k, v]) => (
+                <li key={k}><span className="text-zinc-500">{k} days:</span> {v}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </Question>
 
       <Question n={8} title="Where should the morning email go?">

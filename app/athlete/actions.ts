@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { disconnect } from "@/lib/athlete/whoop";
-import { RACE_DISTANCES, type Distance } from "@/lib/athlete/decide";
+import { FOCUS_MUSCLES, RACE_DISTANCES, type Distance } from "@/lib/athlete/decide";
+import { readNotes } from "@/lib/athlete/notes";
 
 export type SetupResult = { ok: boolean; message: string };
 
@@ -95,11 +96,8 @@ export async function saveAthleteProfile(
   if (!Number.isFinite(longest) || longest < 0 || longest > 100)
     return fail("Longest run should be a distance in miles.");
 
-  // Picked from the athlete's own logged exercises, plus any typed in.
-  const manualLifts = [...new Set([
-    ...form.getAll("manual_lift").map(String),
-    ...String(form.get("manual_lifts_extra") ?? "").split(","),
-  ].map((s) => s.trim().toLowerCase()).filter(Boolean))].slice(0, 40);
+  const focus = [...new Set(form.getAll("focus").map(String))]
+    .filter((m) => (FOCUS_MUSCLES as readonly string[]).includes(m));
 
   const notes = String(form.get("notes") ?? "").trim().slice(0, MAX_NOTES);
 
@@ -111,18 +109,45 @@ export async function saveAthleteProfile(
     .from("athlete_profile").select("config").eq("user_id", user.id).maybeSingle();
   const prev = (existing?.config ?? {}) as Record<string, any>;
 
+  // The notes are read by Claude into the things the engine acts on -- lifts
+  // to hold, per-session cues -- once, when they change. Unchanged notes keep
+  // their last reading; cleared notes clear what was read from them.
+  let notesRead = prev.notes_read ?? null;
+  let notesWarning = "";
+  if (notes !== (prev.notes ?? "")) {
+    if (!notes) notesRead = null;
+    else {
+      try {
+        notesRead = await readNotes(notes);
+        if (!notesRead) notesWarning = " Notes saved, but reading them into the plan is not set up on this deployment.";
+      } catch (e) {
+        console.error("[saveAthleteProfile] readNotes:", e instanceof Error ? e.message : e);
+        notesWarning = " Notes saved, but they could not be read into the plan just now; save again later to retry.";
+      }
+    }
+  }
+
   // Keys the form does not own -- exercise matches, the WHOOP summary, the
-  // learned time zone, cues, additions, tunables -- are carried over untouched.
+  // learned time zone, additions, tunables -- are carried over untouched.
   const config: Record<string, any> = {
     ...prev,
     goals: { list: goals, race },
     week: { lift_days: liftDays, run_days: runDays, long_run_day: longRunDay },
     activities,
     athlete: { ...(prev.athlete ?? {}), zone2_ceiling_bpm: Math.round(zone2), longest_run_mi: longest },
-    manual_lifts: manualLifts,
+    focus_muscles: focus,
     notes: notes || null,
+    notes_read: notesRead,
     email_to: emailTo || null,
   };
+  // What was read from the notes is what the engine holds and reminds; when the
+  // notes have been read, they are the source, otherwise earlier values stand.
+  if (notesRead) {
+    config.manual_lifts = notesRead.manual_lifts;
+    config.cues = { ...(prev.cues ?? {}), ...notesRead.cues };
+  } else if (notes === "" && prev.notes) {
+    config.manual_lifts = [];
+  }
   // Superseded by goals, week and activities; left behind they would disagree.
   delete config.race;
   delete config.lacrosse;
@@ -136,7 +161,7 @@ export async function saveAthleteProfile(
 
   revalidatePath("/athlete");
   revalidatePath("/calendar");
-  return { ok: true, message: "Saved. Tomorrow's plan uses these answers." };
+  return { ok: true, message: "Saved. Tomorrow's plan uses these answers." + notesWarning };
 }
 
 export async function disconnectWhoop() {

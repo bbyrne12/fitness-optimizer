@@ -11,7 +11,7 @@ import { planInputs } from "@/lib/athlete/decide";
 import { connectionStatus } from "@/lib/athlete/whoop";
 
 import { disconnectWhoop } from "./actions";
-import { SetupForm, type SetupDefaults, type SportSeen } from "./setup-form";
+import { SetupForm, type NotesRead, type SetupDefaults, type SportSeen } from "./setup-form";
 
 export const metadata = { title: "Athlete setup" };
 
@@ -79,20 +79,10 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/auth/login");
 
-  const [{ data: prof }, status, { data: setNames }, { data: logNames }] = await Promise.all([
+  const [{ data: prof }, status] = await Promise.all([
     supabase.from("athlete_profile").select("config").eq("user_id", user.id).maybeSingle(),
     connectionStatus(user.id),
-    // Every exercise the athlete has logged, for the manual-lifts picker.
-    supabase.from("athlete_sets").select("exercise").eq("user_id", user.id).range(0, 999),
-    supabase.from("workout_logs").select("exercises(name)").eq("user_id", user.id).range(0, 999),
   ]);
-  const liftNames = [...new Set([
-    ...(setNames ?? []).map((r: any) => String(r.exercise ?? "").trim()),
-    ...(logNames ?? []).map((r: any) => {
-      const ex = Array.isArray(r.exercises) ? r.exercises[0] : r.exercises;
-      return String(ex?.name ?? "").trim();
-    }),
-  ].filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const cfg = (prof?.config ?? {}) as Record<string, any>;
   const answered = Boolean(cfg.goals || cfg.race);
   const inputs = planInputs(cfg);
@@ -120,7 +110,7 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
     })),
     zone2: cfg.athlete?.zone2_ceiling_bpm ?? "",
     longestRunMi: inputs.longestRunMi || "",
-    manualLifts: Array.isArray(cfg.manual_lifts) ? cfg.manual_lifts.map(String) : [],
+    focusMuscles: Array.isArray(cfg.focus_muscles) ? cfg.focus_muscles.map(String) : [],
     notes: typeof cfg.notes === "string" ? cfg.notes : "",
     emailTo: cfg.email_to ?? "",
   };
@@ -184,7 +174,7 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
         accountEmail={user.email ?? ""}
         sportsSeen={sportsSeen}
         zone2Suggestion={zone2Suggestion}
-        liftNames={liftNames}
+        notesRead={(cfg.notes_read as NotesRead | null) ?? null}
       />
     </>
   );
