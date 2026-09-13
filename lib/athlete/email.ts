@@ -4,7 +4,7 @@
  *
  * Email clients strip <style> blocks, so this is all inline styles.
  */
-const BG = "#09090b", CARD = "#18181b", LINE = "#27272a";
+const BG = "#09090b", LINE = "#27272a";
 const FG = "#fafafa", MUTED = "#a1a1aa", DIM = "#71717a";
 const STATE: Record<string, string> = {
   green: "#22c55e", yellow: "#f59e0b", red: "#ef4444",

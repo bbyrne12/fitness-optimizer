@@ -1,5 +1,7 @@
 # Fitness Optimizer
 
+[![CI](https://github.com/bbyrne12/fitness-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/bbyrne12/fitness-optimizer/actions/workflows/ci.yml)
+
 A training app that reads WHOOP recovery data each morning and emails one
 specific prescription for the day: what to train, how hard, and at what loads.
 
@@ -52,9 +54,8 @@ and sends only once recovery is actually scored, with the day's row in
 repeat emails. GitHub Actions was the first poller and turned out to fire 2 of
 roughly 32 scheduled runs in its first 34 hours, because scheduled workflows on
 free public repos are best-effort. The replacement is `pg_cron` inside
-Postgres, a real scheduler, with the Actions workflow kept as a fallback until
-the new job has proven itself. The reasoning is preserved in
-`db/migrations/003_morning_cron.sql`.
+Postgres, a real scheduler, and the Actions poller is gone. The reasoning is
+preserved in `db/migrations/003_morning_cron.sql`.
 
 **WHOOP rotates its refresh token on every use and invalidates the old one
 immediately.** That makes concurrent refreshes a permanent lockout rather than a
@@ -144,3 +145,7 @@ athlete.
 
 `GET /api/morning?dry=1` runs the whole pipeline, sends nothing, and returns the
 decision as JSON. That is the fastest way to see what the engine does.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

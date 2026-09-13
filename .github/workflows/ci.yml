@@ -1,0 +1,21 @@
+name: CI
+
+# Typecheck and lint on every push and pull request. There is no build step
+# here: `next build` needs the Supabase and WHOOP environment, and Vercel
+# already builds every push.
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint

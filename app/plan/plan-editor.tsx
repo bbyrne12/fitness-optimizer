@@ -258,7 +258,7 @@ export function PlanEditor({
       </Card>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {DAYS.map(({ d, label, short }) => {
+        {DAYS.map(({ d, label }) => {
           const plannedDay = byDay.get(d) ?? null;
           const focus = plannedDay?.focus ?? "Rest";
           const exercises = plannedDay?.exercises ?? [];
