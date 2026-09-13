@@ -737,13 +737,17 @@ export function lastSessionOf(sets: LoggedSet[], kind: string) {
   if (!days.length) return { day: null as string | null, exercises: [] as LoggedSet[] };
 
   const day = days[0];
+  // "Bench: 95 x 10, 8" is logged as one row per set, so the heaviest row leads
+  // and the set count is everything done on that exercise that day.
   const best: Record<string, LoggedSet> = {};
+  const total: Record<string, number> = {};
   for (const r of sets) {
     if (r.day !== day) continue;
     const k = r.exercise.trim();
+    total[k] = (total[k] ?? 0) + r.sets;
     if (!best[k] || (r.weight ?? 0) > (best[k].weight ?? 0)) best[k] = r;
   }
-  return { day, exercises: Object.values(best) };
+  return { day, exercises: Object.values(best).map((r) => ({ ...r, sets: total[r.exercise.trim()] })) };
 }
 
 /** More weight only when it's been earned: same top set 3 sessions, green day. */
@@ -950,6 +954,7 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
                           z2: number, longMi: number, opts: {
                             hrvStreak?: number; intervalsReady?: boolean;
                             easyMinutes?: number; personal?: Personal;
+                            defaultSets?: number;
                           } = {}) {
   const personal = opts.personal ?? personalFrom({});
   const items: string[] = [];
@@ -976,7 +981,10 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
       // A strength goal earns the next load after two clean sessions, not three.
       const bump = progression(sets, e.exercise, e.weight, level,
                                personal.goals.includes("strength") ? 2 : 3, personal.manualLifts);
-      items.push(`${e.exercise} — ${e.sets} x ${e.reps ?? "–"} @ ${load}` +
+      // A short last session (one heavy single, a cut-short day) is not the
+      // program: the prescription is at least the default set count.
+      const nSets = Math.max(e.sets, opts.defaultSets ?? DEFAULT_TUNABLES.default_sets);
+      items.push(`${e.exercise} — ${nSets} x ${e.reps ?? "–"} @ ${load}` +
                  (bump ? `  ↑ go to ${bump}` : ""));
     }
   }
@@ -1122,18 +1130,20 @@ export function decide(state: ReturnType<typeof buildState>,
       ? " Pull lift too: rows, and add a vertical pull."
       : ` ${LIFT_LABEL[lift]} too.`;
   } else if (planned === "legs") {
-    call = level === "green" ? "Leg day." : "Leg day — hold the weights where they were.";
+    call = "Leg day.";
     detail = level === "green"
       ? `Quad day costs about 3.5 recovery points.${longRunDow ? ` ${DAY_NAME[longRunDow]} is far enough away.` : ""}`
       : "Amber recovery. Same session, no load increase.";
   } else if (lift && lift !== "push") {
-    call = level === "green" ? `${LIFT_LABEL[lift]}.` : `${LIFT_LABEL[lift]} — hold at current weights.`;
+    call = `${LIFT_LABEL[lift]}.`;
     detail = personal.cues[lift] ?? (lift === "full body"
       ? "One session across the whole body; what leads rotates each time."
       : "Upper body only — the cheapest session of the week.");
+    if (level !== "green") detail = `Hold at current weights. ${detail}`;
   } else {
-    call = level === "green" ? "Push lift." : "Push lift — hold at current weights.";
+    call = "Push lift.";
     detail = personal.cues.push ?? "Upper body only — the cheapest session of the week.";
+    if (level !== "green") detail = `Hold at current weights. ${detail}`;
   }
 
   return { level, call, detail, planned, why_today: why, reasons,
