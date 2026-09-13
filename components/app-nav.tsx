@@ -15,9 +15,9 @@ import { Menu } from "lucide-react";
 // reference the app uses behind the scenes. Both are linked from the dashboard.
 const NAV_LINKS = [
   { href: "/protected", label: "Dashboard" },
+  { href: "/athlete", label: "Setup" },
   { href: "/calendar", label: "Plan" },
   { href: "/log-workout", label: "Log" },
-  { href: "/athlete", label: "Setup" },
 ] as const;
 
 function isActivePath(pathname: string, href: string) {
