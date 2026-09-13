@@ -9,14 +9,14 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { Menu } from "lucide-react";
 
-// The routine builder (/plan, /plans) is deliberately not here: it is a way
-// to get a starting routine when there is nothing to log yet, so it is linked
-// from the paste box and the dashboard instead.
+// The routine builder (/plan, /plans) and the exercise library (/exercises)
+// are deliberately not here. Neither is part of training day to day: one is a
+// way to get a starting routine when there is nothing to log yet, the other a
+// reference the app uses behind the scenes. Both are linked from the dashboard.
 const NAV_LINKS = [
   { href: "/protected", label: "Dashboard" },
   { href: "/calendar", label: "Plan" },
   { href: "/log-workout", label: "Log" },
-  { href: "/exercises", label: "Exercises" },
   { href: "/athlete", label: "Setup" },
 ] as const;
 
