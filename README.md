@@ -128,11 +128,17 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 
 The app runs on those two alone. The morning decision additionally needs
 `SUPABASE_SERVICE_ROLE_KEY`, `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`,
-`RESEND_API_KEY`, `EMAIL_FROM` and `CRON_SECRET`. Apply the files in
-`db/migrations/` in order via the Supabase SQL editor. Register
+`CRON_SECRET`, and a way to send mail. Apply the files in `db/migrations/` in
+order via the Supabase SQL editor. Register
 `https://<your-domain>/api/whoop/callback` as a redirect URL on the WHOOP app
-(or set `WHOOP_REDIRECT_URI`). `EMAIL_FROM` must be on a domain verified with
-Resend: its test sender only delivers to the Resend account's own address.
+(or set `WHOOP_REDIRECT_URI`).
+
+Mail goes over SMTP when `SMTP_HOST`, `SMTP_USER` and `SMTP_PASS` are set
+(`SMTP_PORT` defaults to 465): a Gmail account with an app password is enough
+to email anyone, within Google's 500 a day. Otherwise it goes through Resend
+with `RESEND_API_KEY`, where `EMAIL_FROM` must be on a domain verified with
+Resend, since its test sender only delivers to the Resend account's own
+address. `EMAIL_FROM` is optional over SMTP and defaults to the SMTP user.
 
 Everything specific to an athlete lives in their `athlete_profile` row, set from
 the setup questions rather than the code: main goal, race distance and date,

@@ -1,3 +1,5 @@
+import nodemailer from "nodemailer";
+
 /**
  * The morning email. Short on purpose: the call, the session, one addition.
  * Everything else lives on the page and in WHOOP.
@@ -84,7 +86,34 @@ export function renderEmail(opts: {
 </div></div>`;
 }
 
+/**
+ * Sends the morning email. With SMTP_HOST set it goes over SMTP (a Gmail
+ * account with an app password is enough to email anyone, up to Google's 500
+ * a day); otherwise through Resend, whose test sender only delivers to the
+ * Resend account's own address until EMAIL_FROM is on a verified domain.
+ */
 export async function sendEmail(to: string, subject: string, html: string) {
+  return process.env.SMTP_HOST ? sendViaSmtp(to, subject, html) : sendViaResend(to, subject, html);
+}
+
+async function sendViaSmtp(to: string, subject: string, html: string) {
+  const port = Number(process.env.SMTP_PORT ?? 465);
+  const transport = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port,
+    secure: port === 465,
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  });
+  const info = await transport.sendMail({
+    from: process.env.EMAIL_FROM ?? `Athlete OS <${process.env.SMTP_USER}>`,
+    to,
+    subject,
+    html,
+  });
+  return { id: info.messageId };
+}
+
+async function sendViaResend(to: string, subject: string, html: string) {
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -94,8 +123,6 @@ export async function sendEmail(to: string, subject: string, html: string) {
       "User-Agent": "athlete-os/1.0",
     },
     body: JSON.stringify({
-      // Resend's test sender only delivers to the Resend account's own address.
-      // Emailing anyone else needs EMAIL_FROM on a domain verified with Resend.
       from: process.env.EMAIL_FROM ?? "Athlete OS <onboarding@resend.dev>",
       to: [to],
       subject,
