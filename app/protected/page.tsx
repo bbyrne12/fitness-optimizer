@@ -395,10 +395,10 @@ async function DashboardContent({ searchParams }: { searchParams: Search }) {
                   <div className="rounded-md border bg-background p-2">
                     <Sparkles className="h-5 w-5 text-primary" />
                   </div>
-                  <CardTitle className="text-lg">View My Plan</CardTitle>
+                  <CardTitle className="text-lg">Starting Routine</CardTitle>
                 </div>
                 <CardDescription>
-                  Your personalized weekly workout plan
+                  Nothing to log yet? Generate a routine from your goal and equipment.
                 </CardDescription>
               </CardHeader>
             </Link>

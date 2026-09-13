@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { saveLog, type SaveResult } from "@/app/log/actions";
 
@@ -30,6 +31,13 @@ export function PasteLog({ compact = false }: { compact?: boolean }) {
         today; write one — 9/14, 9/14/26, 9-14 or Sept 14 all work — to log
         another day. Re-saving a day replaces it, so pasting the whole week is
         safe.
+      </p>
+      <p className="mt-2 text-sm text-zinc-500">
+        Nothing to paste yet?{" "}
+        <Link href="/plan" className="text-lime-400 hover:underline">
+          Generate a starting routine
+        </Link>{" "}
+        from your goal and equipment, then log what you actually do.
       </p>
 
       <form action={action} className="mt-6 flex flex-col gap-3">
