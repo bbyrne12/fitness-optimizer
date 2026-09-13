@@ -6,6 +6,8 @@
  * refreshes tokens on every visit would fight the poller for the refresh.
  */
 import { Suspense } from "react";
+
+import { AppNav } from "@/components/app-nav";
 import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/server";
@@ -36,15 +38,18 @@ export default function CalendarPage() {
   // cacheComponents is on, so the Supabase read has to sit inside a Suspense
   // boundary rather than blocking the whole route from rendering.
   return (
-    <Suspense fallback={
-      <main className="mx-auto max-w-4xl px-5 py-10">
-        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-500">
-          Loading the plan…
-        </p>
-      </main>
-    }>
-      <CalendarBody />
-    </Suspense>
+    <>
+      <AppNav />
+      <Suspense fallback={
+        <main className="mx-auto max-w-4xl px-5 py-10">
+          <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+            Loading the plan…
+          </p>
+        </main>
+      }>
+        <CalendarBody />
+      </Suspense>
+    </>
   );
 }
 

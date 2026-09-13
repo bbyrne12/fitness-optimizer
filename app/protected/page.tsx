@@ -140,7 +140,10 @@ function DashboardSkeleton() {
   );
 }
 
-async function DashboardContent() {
+type Search = Promise<{ saved?: string; notes?: string }>;
+
+async function DashboardContent({ searchParams }: { searchParams: Search }) {
+  const { saved, notes } = await searchParams;
   const supabase = await createClient();
 
   const {
@@ -203,6 +206,14 @@ async function DashboardContent() {
 
   return (
     <div className="space-y-8">
+      {saved && (
+        <div className={`rounded-md border p-4 text-sm ${
+          notes ? "border-amber-400/40 bg-amber-400/5 text-zinc-200" : "border-lime-400/40 bg-lime-400/5 text-zinc-200"
+        }`}>
+          Plan saved. Tomorrow&apos;s email uses these answers.{notes ? ` ${notes}` : ""}{" "}
+          <Link href="/calendar" className="text-lime-400 hover:underline">See the training plan</Link>
+        </div>
+      )}
       <header className="space-y-1">
         <p className="text-sm text-muted-foreground">Dashboard</p>
         <h1 className="text-3xl font-semibold tracking-tight">
@@ -414,14 +425,14 @@ async function DashboardContent() {
   );
 }
 
-export default function ProtectedPage() {
+export default function ProtectedPage({ searchParams }: { searchParams: Search }) {
   return (
     <>
       <AppNav />
       <main className="min-h-screen w-full px-4 py-10">
         <div className="mx-auto w-full max-w-6xl">
           <Suspense fallback={<DashboardSkeleton />}>
-            <DashboardContent />
+            <DashboardContent searchParams={searchParams} />
           </Suspense>
         </div>
       </main>

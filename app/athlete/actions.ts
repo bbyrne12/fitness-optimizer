@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import { disconnect } from "@/lib/athlete/whoop";
@@ -161,7 +162,10 @@ export async function saveAthleteProfile(
 
   revalidatePath("/athlete");
   revalidatePath("/calendar");
-  return { ok: true, message: "Saved. Tomorrow's plan uses these answers." + notesWarning };
+  revalidatePath("/protected");
+  // Back to the dashboard, which shows the confirmation. Anything that went
+  // wrong reading the notes travels with it, so it is not lost to the redirect.
+  redirect(`/protected?saved=1${notesWarning ? `&notes=${encodeURIComponent(notesWarning.trim())}` : ""}`);
 }
 
 export async function disconnectWhoop() {
