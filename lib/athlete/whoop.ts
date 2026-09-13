@@ -7,7 +7,7 @@
  * is the morning route. The OAuth callback only ever stores an athlete's first
  * pair, and tokens are only ever touched with the service role key.
  */
-import { admin } from "./supabase";
+import { admin, retrying } from "./supabase";
 
 const AUTH_URL = "https://api.prod.whoop.com/oauth/oauth2/auth";
 const TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
@@ -74,7 +74,7 @@ async function persist(userId: string, t: TokenResponse) {
     throw new Error("WHOOP returned no refresh token; the offline scope must be enabled on the app");
   }
   const expires_at = new Date(Date.now() + t.expires_in * 1000).toISOString();
-  const { error } = await admin()
+  const { error } = await retrying(() => admin()
     .from("whoop_tokens")
     .upsert(
       {
@@ -85,7 +85,7 @@ async function persist(userId: string, t: TokenResponse) {
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" },
-    );
+    ));
   // A failed write here means the next run is locked out permanently, so this
   // must throw rather than continue with a token we did not save.
   if (error) throw new Error(`could not persist WHOOP tokens: ${error.message}`);
@@ -103,11 +103,11 @@ export async function connect(userId: string, code: string, redirectUri: string)
 }
 
 export async function accessToken(userId: string): Promise<string> {
-  const { data, error } = await admin()
+  const { data, error } = await retrying(() => admin()
     .from("whoop_tokens")
     .select("*")
     .eq("user_id", userId)
-    .maybeSingle();
+    .maybeSingle());
   if (error || !data) throw new Error("no WHOOP tokens stored for this athlete");
 
   // Two minutes of headroom so a slow request cannot expire mid-flight.

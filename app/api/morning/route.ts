@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { admin } from "@/lib/athlete/supabase";
+import { admin, retrying } from "@/lib/athlete/supabase";
 import { accessToken, body, pull } from "@/lib/athlete/whoop";
 import { renderEmail, sendEmail } from "@/lib/athlete/email";
 import {
@@ -67,9 +67,10 @@ export async function GET(req: NextRequest) {
 
     // Everyone who has connected WHOOP. Their profile decides whether there is
     // enough to build a plan from.
-    let query = db.from("whoop_tokens").select("user_id").not("user_id", "is", null);
-    if (only) query = query.eq("user_id", only);
-    const { data: connections, error } = await query;
+    const { data: connections, error } = await retrying(() => {
+      const query = db.from("whoop_tokens").select("user_id").not("user_id", "is", null);
+      return only ? query.eq("user_id", only) : query;
+    });
     if (error) throw new Error(`could not list WHOOP connections: ${error.message}`);
     const ids: string[] = (connections ?? []).map((c: { user_id: string }) => c.user_id);
 
@@ -98,10 +99,11 @@ async function inBatches<T, R>(xs: T[], size: number, fn: (x: T) => Promise<R>) 
 }
 
 /** PostgREST caps a response at 1000 rows, and a long training log passes that. */
-async function allRows(page: (from: number, to: number) => any): Promise<any[]> {
+type Page = PromiseLike<{ data: any[] | null; error: { message: string } | null }>;
+async function allRows(page: (from: number, to: number) => Page): Promise<any[]> {
   const out: any[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await page(from, from + PAGE - 1);
+    const { data, error } = await retrying(() => page(from, from + PAGE - 1));
     if (error) throw new Error(error.message);
     out.push(...(data ?? []));
     if (!data || data.length < PAGE) return out;
@@ -119,16 +121,16 @@ const dayAt = (offsetMin: number) =>
   new Date(Date.now() + offsetMin * 60_000).toISOString().slice(0, 10);
 
 async function alreadyEmailed(db: SupabaseClient, userId: string, day: string) {
-  const { data, error } = await db.from("decision_log").select("emailed_at")
-    .eq("user_id", userId).eq("day", day).maybeSingle();
+  const { data, error } = await retrying(() => db.from("decision_log").select("emailed_at")
+    .eq("user_id", userId).eq("day", day).maybeSingle());
   // Reading a failure as "not emailed yet" would send the same email twice.
   if (error) throw new Error(`could not check today's email: ${error.message}`);
   return Boolean(data?.emailed_at);
 }
 
 async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) {
-  const { data: prof, error: profErr } = await db.from("athlete_profile").select("config")
-    .eq("user_id", userId).maybeSingle();
+  const { data: prof, error: profErr } = await retrying(() => db.from("athlete_profile")
+    .select("config").eq("user_id", userId).maybeSingle());
   // A failed read is not "no profile": skipping on it would drop the athlete's
   // email without a trace, where throwing records the failure against them.
   if (profErr) throw new Error(`could not read profile: ${profErr.message}`);
@@ -214,7 +216,7 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
   const sports = summarizeSportDays(sportDays);
   if (offset !== cfg.utc_offset_minutes || cfg.whoop_summary?.updated !== state.date) {
     const measured = cfg.whoop_summary?.max_heart_rate ? null : await body(at).catch(() => null);
-    await db.from("athlete_profile").update({ config: {
+    await retrying(() => db.from("athlete_profile").update({ config: {
       ...cfg,
       utc_offset_minutes: offset,
       whoop_summary: {
@@ -225,7 +227,7 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
         resting_heart_rate: state.rhr ?? null,
         ...(measured?.max_heart_rate ? { max_heart_rate: measured.max_heart_rate } : {}),
       },
-    } }).eq("user_id", userId);
+    } }).eq("user_id", userId));
   }
 
   // Has today's recovery actually landed? If not, say so and wait.
@@ -288,7 +290,8 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
 
   if (opts.dry) return { user_id: userId, sent: false, dry: true, ...payload };
 
-  const to = cfg.email_to || (await db.auth.admin.getUserById(userId)).data.user?.email;
+  const to = cfg.email_to
+    || (await retrying(() => db.auth.admin.getUserById(userId))).data.user?.email;
   if (!to) return { user_id: userId, sent: false, skipped: "no email address" };
 
   const html = renderEmail({
@@ -302,9 +305,9 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
 
   // The email has gone. If this write fails the next poll sends it again, so
   // the failure is reported rather than swallowed.
-  const { error: logErr } = await db.from("decision_log").upsert(
+  const { error: logErr } = await retrying(() => db.from("decision_log").upsert(
     { user_id: userId, day: state.date, decision: payload, emailed_at: new Date().toISOString() },
-    { onConflict: "user_id,day" });
+    { onConflict: "user_id,day" }));
 
   return {
     user_id: userId, sent: true, id, day: state.date, call: decision.call,
