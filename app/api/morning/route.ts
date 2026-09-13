@@ -119,14 +119,19 @@ const dayAt = (offsetMin: number) =>
   new Date(Date.now() + offsetMin * 60_000).toISOString().slice(0, 10);
 
 async function alreadyEmailed(db: SupabaseClient, userId: string, day: string) {
-  const { data } = await db.from("decision_log").select("emailed_at")
+  const { data, error } = await db.from("decision_log").select("emailed_at")
     .eq("user_id", userId).eq("day", day).maybeSingle();
+  // Reading a failure as "not emailed yet" would send the same email twice.
+  if (error) throw new Error(`could not check today's email: ${error.message}`);
   return Boolean(data?.emailed_at);
 }
 
 async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) {
-  const { data: prof } = await db.from("athlete_profile").select("config")
+  const { data: prof, error: profErr } = await db.from("athlete_profile").select("config")
     .eq("user_id", userId).maybeSingle();
+  // A failed read is not "no profile": skipping on it would drop the athlete's
+  // email without a trace, where throwing records the failure against them.
+  if (profErr) throw new Error(`could not read profile: ${profErr.message}`);
   const cfg = (prof?.config ?? null) as Record<string, any> | null;
   if (!cfg)
     return { user_id: userId, sent: false, skipped: "no training profile yet" };
