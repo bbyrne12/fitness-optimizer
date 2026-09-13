@@ -128,6 +128,13 @@ async function CalendarBody() {
         </div>
       </header>
 
+      {cfg.notes && (
+        <section className="mt-6 rounded-md border border-zinc-800 bg-zinc-900/40 px-4 py-3">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Your notes</p>
+          <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-zinc-300">{cfg.notes}</p>
+        </section>
+      )}
+
       <section className="mt-6 flex flex-wrap gap-2">
         {gates.map((g) => (
           <span

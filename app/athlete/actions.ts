@@ -13,9 +13,8 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const INTENSITIES = ["easy", "moderate", "hard"];
 /** Session kinds the engine uses itself; an activity cannot take one of these names. */
 const RESERVED = new Set(["run", "rest", "legs", "pull", "push", "upper", "running", "weightlifting"]);
-/** Profile keys edited as raw JSON. Whatever is in the box replaces them. */
-const ADVANCED_KEYS = ["cues", "additions", "tunables", "cadence_spm"];
 const MAX_ACTIVITIES = 10;
+const MAX_NOTES = 2000;
 
 const fail = (message: string): SetupResult => ({ ok: false, message });
 
@@ -32,8 +31,8 @@ export async function saveAthleteProfile(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return fail("Sign in first.");
 
-  const goal = String(form.get("goal") ?? "");
-  if (!GOALS.includes(goal)) return fail("Pick a main goal.");
+  const goals = [...new Set(form.getAll("goal").map(String))].filter((g) => GOALS.includes(g));
+  if (!goals.length) return fail("Pick at least one goal.");
 
   const distance = String(form.get("race_distance") ?? "");
   let race: { distance: Distance; date: string; name: string } | null = null;
@@ -50,7 +49,7 @@ export async function saveAthleteProfile(
       name: String(form.get("race_name") ?? "").trim().slice(0, 60) || RACE_DISTANCES[d].label,
     };
   }
-  if (goal === "race" && !race) return fail("Training for a race needs a distance and a date.");
+  if (goals.includes("race") && !race) return fail("Training for a race needs a distance and a date.");
 
   const liftDays = dayCount(form.get("lift_days"));
   const runDays = dayCount(form.get("run_days"));
@@ -96,51 +95,38 @@ export async function saveAthleteProfile(
   if (!Number.isFinite(longest) || longest < 0 || longest > 100)
     return fail("Longest run should be a distance in miles.");
 
-  const manualLifts = String(form.get("manual_lifts") ?? "")
-    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).slice(0, 20);
+  // Picked from the athlete's own logged exercises, plus any typed in.
+  const manualLifts = [...new Set([
+    ...form.getAll("manual_lift").map(String),
+    ...String(form.get("manual_lifts_extra") ?? "").split(","),
+  ].map((s) => s.trim().toLowerCase()).filter(Boolean))].slice(0, 40);
+
+  const notes = String(form.get("notes") ?? "").trim().slice(0, MAX_NOTES);
 
   const emailTo = String(form.get("email_to") ?? "").trim();
   if (emailTo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTo))
     return fail("That email address does not look right.");
-
-  let advanced: Record<string, unknown> = {};
-  const raw = String(form.get("advanced") ?? "").trim();
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-        return fail("Advanced settings must be a JSON object.");
-      const unknown = Object.keys(parsed).filter((k) => !ADVANCED_KEYS.includes(k));
-      if (unknown.length) return fail(`Unknown advanced setting: ${unknown.join(", ")}.`);
-      advanced = parsed;
-    } catch {
-      return fail("Advanced settings are not valid JSON.");
-    }
-  }
 
   const { data: existing } = await supabase
     .from("athlete_profile").select("config").eq("user_id", user.id).maybeSingle();
   const prev = (existing?.config ?? {}) as Record<string, any>;
 
   // Keys the form does not own -- exercise matches, the WHOOP summary, the
-  // learned time zone -- are carried over untouched.
+  // learned time zone, cues, additions, tunables -- are carried over untouched.
   const config: Record<string, any> = {
     ...prev,
-    goals: { primary: goal, race },
+    goals: { list: goals, race },
     week: { lift_days: liftDays, run_days: runDays, long_run_day: longRunDay },
     activities,
     athlete: { ...(prev.athlete ?? {}), zone2_ceiling_bpm: Math.round(zone2), longest_run_mi: longest },
     manual_lifts: manualLifts,
+    notes: notes || null,
     email_to: emailTo || null,
   };
   // Superseded by goals, week and activities; left behind they would disagree.
   delete config.race;
   delete config.lacrosse;
   delete config.tennis;
-  for (const k of ADVANCED_KEYS) {
-    if (k in advanced) config[k] = advanced[k];
-    else delete config[k];
-  }
 
   const { error } = await supabase.from("athlete_profile").upsert(
     { user_id: user.id, config, updated_at: new Date().toISOString() },

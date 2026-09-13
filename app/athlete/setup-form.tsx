@@ -23,7 +23,7 @@ export type ActivityRow = {
 export type SportSeen = { sport: string; sessions: number; cost: number | null; n: number };
 
 export type SetupDefaults = {
-  goal: string;
+  goals: string[];
   raceDistance: string;
   raceDate: string;
   raceName: string;
@@ -33,25 +33,27 @@ export type SetupDefaults = {
   activities: ActivityRow[];
   zone2: number | string;
   longestRunMi: number | string;
-  manualLifts: string;
+  /** Exact exercise names, as logged, that never get automatic increases. */
+  manualLifts: string[];
+  notes: string;
   emailTo: string;
-  advanced: string;
 };
 
-const GOALS = [
-  { id: "hrv", title: "Raise HRV and recovery",
-    body: "The breathing protocol comes in after one low HRV morning, not two." },
-  { id: "race", title: "Train for a race",
-    body: "The long run builds toward race day, never faster than 10% a week." },
-  { id: "strength", title: "Build strength",
-    body: "Lifts earn their next weight after two clean sessions instead of three." },
-  { id: "general", title: "General fitness",
-    body: "A balanced week built from the days you give it." },
+const GOALS: [string, string][] = [
+  ["hrv", "Raise HRV and recovery"],
+  ["race", "Train for a race"],
+  ["strength", "Build strength"],
+  ["general", "General fitness"],
 ];
 
 const DISTANCES: [string, string][] = [
   ["", "No race"], ["5k", "5K"], ["10k", "10K"], ["half", "Half marathon"], ["marathon", "Marathon"],
 ];
+
+const NOTES_PLACEHOLDER = `e.g. Ran a 10K two years ago and got shin splints in the last month of the build.
+Labrum repair last August — bench and overhead stay light.
+By March I want to finish the half under 2:00 and be back squatting my bodyweight.
+The call I want each morning: whether today's run happens or moves to Thursday.`;
 
 const field =
   "rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 " +
@@ -105,20 +107,33 @@ function costLine(seen: SportSeen | undefined) {
 
 const inWeekOrder = (days: string[]) => DAYS.filter((d) => days.includes(d));
 
-export function SetupForm({ defaults, accountEmail, sportsSeen, zone2Suggestion }: {
+export function SetupForm({ defaults, accountEmail, sportsSeen, zone2Suggestion, liftNames }: {
   defaults: SetupDefaults;
   accountEmail: string;
   sportsSeen: SportSeen[];
   zone2Suggestion: number | null;
+  /** Every exercise name in the athlete's own log, for the manual-lifts picker. */
+  liftNames: string[];
 }) {
   const [result, action, pending] = useActionState<SetupResult | null, FormData>(
     saveAthleteProfile,
     null,
   );
-  const [goal, setGoal] = useState(defaults.goal);
+  const [goals, setGoals] = useState<string[]>(defaults.goals);
   const [distance, setDistance] = useState(defaults.raceDistance);
   const [rows, setRows] = useState<ActivityRow[]>(defaults.activities);
   const [zone2, setZone2] = useState(String(defaults.zone2));
+  const [manual, setManual] = useState<Set<string>>(() => {
+    // Saved values may be fragments from an older profile ("bench" for every
+    // bench variant); a name is pre-ticked if any saved value is part of it.
+    const picked = new Set<string>();
+    for (const name of liftNames)
+      if (defaults.manualLifts.some((m) => name.toLowerCase().includes(m.toLowerCase()))) picked.add(name);
+    return picked;
+  });
+  const unlisted = defaults.manualLifts
+    .filter((m) => !liftNames.some((n) => n.toLowerCase().includes(m.toLowerCase())))
+    .join(", ");
 
   const seen = useMemo(() => new Map(sportsSeen.map((s) => [s.sport, s])), [sportsSeen]);
   const fromWhoop = sportsSeen.map((s) => s.sport).filter((s) => !EXCLUDED_SPORTS.has(s));
@@ -127,36 +142,40 @@ export function SetupForm({ defaults, accountEmail, sportsSeen, zone2Suggestion 
 
   const update = (i: number, patch: Partial<ActivityRow>) =>
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const toggleGoal = (g: string) =>
+    setGoals((gs) => (gs.includes(g) ? gs.filter((x) => x !== g) : [...gs, g]));
 
   return (
     <form action={action} className="flex flex-col gap-4">
       <input type="hidden" name="activities" value={JSON.stringify(rows)} />
 
-      <Question n={1} title="What's your main goal?">
+      <Question n={1} title="What are you training for?" note="Pick everything that applies.">
         <div className="grid gap-2 sm:grid-cols-2">
-          {GOALS.map((g) => (
-            <label
-              key={g.id}
-              className={`cursor-pointer rounded-lg border p-3 transition ${
-                goal === g.id ? "border-lime-400/60 bg-lime-400/5" : "border-zinc-800 bg-zinc-950 hover:border-zinc-700"
-              }`}
-            >
-              <input
-                type="radio" name="goal" value={g.id} checked={goal === g.id}
-                onChange={() => setGoal(g.id)} className="sr-only"
-              />
-              <span className="block text-sm font-medium text-white">{g.title}</span>
-              <span className="mt-1 block text-[12px] leading-relaxed text-zinc-400">{g.body}</span>
-            </label>
-          ))}
+          {GOALS.map(([id, title]) => {
+            const on = goals.includes(id);
+            return (
+              <label
+                key={id}
+                className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition ${
+                  on ? "border-lime-400/60 bg-lime-400/5" : "border-zinc-800 bg-zinc-950 hover:border-zinc-700"
+                }`}
+              >
+                <input
+                  type="checkbox" name="goal" value={id} checked={on}
+                  onChange={() => toggleGoal(id)} className="accent-lime-400"
+                />
+                <span className="text-sm font-medium text-white">{title}</span>
+              </label>
+            );
+          })}
         </div>
       </Question>
 
       <Question
         n={2}
-        title="Are you training for a race?"
-        note={goal === "race"
-          ? "Your goal is a race, so this one is needed."
+        title="Is there a race?"
+        note={goals.includes("race")
+          ? "Your goals include a race, so this one is needed."
           : "Optional. A race gives the long run something to build toward; without one the plan looks twelve weeks ahead."}
       >
         <div className="grid gap-3 sm:grid-cols-3">
@@ -359,39 +378,59 @@ export function SetupForm({ defaults, accountEmail, sportsSeen, zone2Suggestion 
 
       <Question
         n={6}
-        title="Any lifts you progress by hand?"
-        note="An injury or a rehab block. These never get automatic weight increases; the plan keeps them where you left them."
+        title="Any lifts that should stay at their current weight?"
+        note="Something you're rehabbing or want to hold steady. The plan repeats these at the weight you last used and never suggests going up."
       >
+        {liftNames.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {liftNames.map((name) => {
+              const on = manual.has(name);
+              return (
+                <label key={name} className={`cursor-pointer ${toggle(on)}`}>
+                  <input
+                    type="checkbox" name="manual_lift" value={name} checked={on}
+                    onChange={() => setManual((m) => {
+                      const next = new Set(m);
+                      if (next.has(name)) next.delete(name); else next.add(name);
+                      return next;
+                    })}
+                    className="sr-only"
+                  />
+                  {name}
+                </label>
+              );
+            })}
+          </div>
+        ) : (
+          <p className={hint}>Nothing logged yet. Once you have logged workouts, your lifts appear here to pick from.</p>
+        )}
         <input
-          name="manual_lifts" defaultValue={defaults.manualLifts}
-          placeholder="e.g. bench, overhead press" className={`${field} w-full`}
+          name="manual_lifts_extra" defaultValue={unlisted}
+          placeholder={liftNames.length ? "Any others, comma-separated" : "e.g. bench, overhead press"}
+          className={`${field} mt-3 w-full`}
         />
       </Question>
 
-      <Question n={7} title="Where should the morning email go?">
+      <Question
+        n={7}
+        title="Anything else about where you're trying to get to?"
+        note="Whatever the questions above don't cover: your history with this distance or sport and how it went, injuries or anything to work around, what you want to be true in six months if there's no race, and the one call you want the morning email to make for you."
+      >
+        <textarea
+          name="notes" rows={7} maxLength={2000} defaultValue={defaults.notes}
+          placeholder={NOTES_PLACEHOLDER}
+          className={`${field} w-full leading-relaxed`}
+        />
+        <p className={`${hint} mt-1.5`}>Shown with your training plan so it's read alongside these answers.</p>
+      </Question>
+
+      <Question n={8} title="Where should the morning email go?">
         <input
           name="email_to" type="email" placeholder={accountEmail}
           defaultValue={defaults.emailTo} className={`${field} w-full`}
         />
         <p className={`${hint} mt-1.5`}>Leave blank to use the address you signed in with.</p>
       </Question>
-
-      <details className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-        <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-wider text-zinc-500">
-          Advanced (JSON)
-        </summary>
-        <p className={`${hint} mt-2`}>
-          Optional. <code>cues</code>: a line per session type. <code>additions</code>: an extra
-          exercise per session type, as [name, dose, why]. <code>tunables</code>, including{" "}
-          <code>cost_&lt;sport&gt;</code> to fix a sport&apos;s cost, and <code>cadence_spm</code>.
-          What is in this box is exactly what gets saved.
-        </p>
-        <textarea
-          name="advanced" rows={8} spellCheck={false} defaultValue={defaults.advanced}
-          placeholder='{"tunables": {"cost_soccer": -4}}'
-          className={`${field} mt-2 w-full font-mono text-[12px]`}
-        />
-      </details>
 
       <div className="flex flex-wrap items-center gap-3">
         <button

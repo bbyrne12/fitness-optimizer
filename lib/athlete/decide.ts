@@ -63,7 +63,7 @@ export type Activity = {
 
 /** Everything the shape of the plan comes from, read off the profile. */
 export type PlanInputs = {
-  goal: Goal;
+  goals: Goal[];
   race: { distance: Distance; date: string; name: string; miles: number; peakLongMi: number } | null;
   liftDays: number;
   runDays: number;
@@ -75,6 +75,13 @@ export type PlanInputs = {
 
 const GOALS: Goal[] = ["hrv", "race", "strength", "general"];
 const INTENSITIES: Intensity[] = ["easy", "moderate", "hard"];
+
+/** Goals were a single `primary` before they could be combined. */
+function readGoals(cfg: Record<string, any>, hasRace: boolean): Goal[] {
+  const list: unknown = Array.isArray(cfg.goals?.list) ? cfg.goals.list : [cfg.goals?.primary];
+  const goals = (list as unknown[]).filter((g): g is Goal => GOALS.includes(g as Goal));
+  return goals.length ? goals : [hasRace ? "race" : "general"];
+}
 
 const dayCount = (n: unknown, fallback: number) => {
   const x = Math.round(Number(n));
@@ -130,7 +137,7 @@ export function planInputs(cfg: Record<string, any>): PlanInputs {
 
   const week = cfg.week ?? {};
   return {
-    goal: GOALS.includes(cfg.goals?.primary) ? cfg.goals.primary : race ? "race" : "general",
+    goals: readGoals(cfg, Boolean(race)),
     race,
     liftDays: dayCount(week.lift_days, 3),
     runDays: dayCount(week.run_days, 2),
@@ -159,7 +166,7 @@ export type Personal = {
   manualLifts: string[];
   additions: Record<string, [string, string, string]>;
   cadenceSpm: number | null;
-  goal: Goal;
+  goals: Goal[];
   activities: Activity[];
   /** What each activity costs this athlete; filled in with activityCosts(). */
   activityCosts: Record<string, ActivityCost>;
@@ -184,7 +191,7 @@ export function personalFrom(cfg: Record<string, any>): Personal {
     manualLifts: Array.isArray(cfg.manual_lifts) ? cfg.manual_lifts : [],
     additions,
     cadenceSpm: typeof cfg.cadence_spm === "number" ? cfg.cadence_spm : null,
-    goal: inputs.goal,
+    goals: inputs.goals,
     activities: inputs.activities,
     activityCosts: {},
   };
@@ -932,7 +939,7 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
       const load = e.weight ? `${e.weight}` : e.pin ?? "bodyweight";
       // A strength goal earns the next load after two clean sessions, not three.
       const bump = progression(sets, e.exercise, e.weight, level,
-                               personal.goal === "strength" ? 2 : 3, personal.manualLifts);
+                               personal.goals.includes("strength") ? 2 : 3, personal.manualLifts);
       items.push(`${e.exercise} — ${e.sets} x ${e.reps ?? "–"} @ ${load}` +
                  (bump ? `  ↑ go to ${bump}` : ""));
     }
@@ -960,7 +967,7 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   // When HRV is the thing that is off, the breathing protocol outranks whatever
   // else was scheduled: after one low morning when HRV is the athlete's goal,
   // after two otherwise.
-  if ((opts.hrvStreak ?? 0) >= (personal.goal === "hrv" ? 1 : 2))
+  if ((opts.hrvStreak ?? 0) >= (personal.goals.includes("hrv") ? 1 : 2))
     add = ["Slow breathing", "10 min at 6 breaths/min",
            "HRV has been below its band. Slow breathing is the best-evidenced " +
            "way to raise RMSSD: 5-15 ms over 4-6 weeks."];

@@ -32,8 +32,6 @@ const NOTICES: Record<string, { ok: boolean; text: string }> = {
   unavailable: { ok: false, text: "WHOOP connections are not configured on this deployment yet." },
 };
 
-const ADVANCED_KEYS = ["cues", "additions", "tunables", "cadence_spm"];
-
 const primaryBtn =
   "inline-block rounded-md bg-lime-400 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-lime-300";
 const quietBtn =
@@ -81,10 +79,20 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/auth/login");
 
-  const [{ data: prof }, status] = await Promise.all([
+  const [{ data: prof }, status, { data: setNames }, { data: logNames }] = await Promise.all([
     supabase.from("athlete_profile").select("config").eq("user_id", user.id).maybeSingle(),
     connectionStatus(user.id),
+    // Every exercise the athlete has logged, for the manual-lifts picker.
+    supabase.from("athlete_sets").select("exercise").eq("user_id", user.id).range(0, 999),
+    supabase.from("workout_logs").select("exercises(name)").eq("user_id", user.id).range(0, 999),
   ]);
+  const liftNames = [...new Set([
+    ...(setNames ?? []).map((r: any) => String(r.exercise ?? "").trim()),
+    ...(logNames ?? []).map((r: any) => {
+      const ex = Array.isArray(r.exercises) ? r.exercises[0] : r.exercises;
+      return String(ex?.name ?? "").trim();
+    }),
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const cfg = (prof?.config ?? {}) as Record<string, any>;
   const answered = Boolean(cfg.goals || cfg.race);
   const inputs = planInputs(cfg);
@@ -99,11 +107,8 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
     ? Math.round(restingHr + 0.7 * (maxHr - restingHr))
     : null;
 
-  const advanced: Record<string, unknown> = {};
-  for (const k of ADVANCED_KEYS) if (cfg[k] !== undefined) advanced[k] = cfg[k];
-
   const defaults: SetupDefaults = {
-    goal: answered ? inputs.goal : "",
+    goals: answered ? inputs.goals : [],
     raceDistance: inputs.race?.distance ?? "",
     raceDate: inputs.race?.date ?? "",
     raceName: cfg.goals?.race?.name ?? cfg.race?.name ?? "",
@@ -115,9 +120,9 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
     })),
     zone2: cfg.athlete?.zone2_ceiling_bpm ?? "",
     longestRunMi: inputs.longestRunMi || "",
-    manualLifts: (Array.isArray(cfg.manual_lifts) ? cfg.manual_lifts : []).join(", "),
+    manualLifts: Array.isArray(cfg.manual_lifts) ? cfg.manual_lifts.map(String) : [],
+    notes: typeof cfg.notes === "string" ? cfg.notes : "",
     emailTo: cfg.email_to ?? "",
-    advanced: Object.keys(advanced).length ? JSON.stringify(advanced, null, 2) : "",
   };
   const ready = status.connected && answered;
 
@@ -169,7 +174,7 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
         <p className="mt-1 text-sm text-zinc-400">
           {ready
             ? `You're set: the morning email goes to ${cfg.email_to || user.email}. Change any answer and tomorrow's plan follows it.`
-            : "Seven questions. Each one changes the week the plan builds."}
+            : "Eight questions. Each one changes the week the plan builds."}
         </p>
       </div>
 
@@ -179,6 +184,7 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
         accountEmail={user.email ?? ""}
         sportsSeen={sportsSeen}
         zone2Suggestion={zone2Suggestion}
+        liftNames={liftNames}
       />
     </>
   );
