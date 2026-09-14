@@ -950,14 +950,43 @@ function focusAddition(focus: string[], planned: string, lift: string | null) {
   return null;
 }
 
+/**
+ * Where an exercise belongs in a session. The lift that asks the most goes
+ * first, while the athlete is fresh and form is best; isolation work goes
+ * last because it does not care how tired they are.
+ *   0  the day's main compound lift (squat, hack, leg press, deadlift, bench, press)
+ *   1  secondary compounds: unilateral, hinge, rows, pulls
+ *   2  isolation
+ *   3  finishers: calves and core
+ * Checked from the bottom up, because "single leg calf raise" is a calf
+ * exercise and "tricep pulldown" is not a lat pulldown.
+ */
+export function exerciseTier(name: string, muscle?: string | null): number {
+  const n = name.toLowerCase();
+  const m = (muscle ?? "").toLowerCase();
+  if (/calf|calves|\btib|shin|\babs?\b|abdominal|crunch|plank|torso|\bcore\b|oblique|dead bug|bird dog|hollow|sit ?ups?|leg raise|hanging knee/.test(n)
+      || /calves|abdominal|oblique/.test(m)) return 3;
+  if (/tricep|bicep|curl|extension|lateral raise|front raise|rear delt|reverse fly|\bfly|flye|pec deck|face pull|kickback|pushdown|pullover|shrug|rotation|inner thigh|outer thigh|adduct|abduct/.test(n)) return 2;
+  if (/bulgarian|split squat|lunge|step ?up|\brdl|romanian|good morning|single.?leg|pistol|nordic|hip thrust|glute bridge|\brow|lat pull|pull ?down|pull ?up|chin ?up|\bdip/.test(n)) return 1;
+  if (/squat|hack|leg press|deadlift|bench|press|clean|snatch/.test(n)) return 0;
+  return 1.5;
+}
+
+/** A session's lifts in the order to do them, and how: the compounds as
+ *  straight sets, the small stuff as one mini circuit. */
+export type SessionBlock = { title: string | null; note: string | null; items: string[] };
+
 export function prescribe(sets: LoggedSet[], planned: string, level: string,
                           z2: number, longMi: number, opts: {
                             hrvStreak?: number; intervalsReady?: boolean;
                             easyMinutes?: number; personal?: Personal;
                             defaultSets?: number;
+                            /** Primary muscle of a logged name, from the athlete's alias map. */
+                            muscleOf?: (name: string) => string | null | undefined;
                           } = {}) {
   const personal = opts.personal ?? personalFrom({});
   const items: string[] = [];
+  const blocks: SessionBlock[] = [];
   let source: string | null = null;
 
   const lift = liftOf(planned);
@@ -976,7 +1005,12 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
       .sort((a, b) => a.d.localeCompare(b.d))[0].k;
     const { day, exercises } = lastSessionOf(sets, kind);
     source = day;
-    for (const e of exercises) {
+    // Heaviest first, finishers last; ties keep the order they were logged in.
+    const ordered = exercises
+      .map((e, i) => ({ e, i, tier: exerciseTier(e.exercise, opts.muscleOf?.(e.exercise)) }))
+      .sort((a, b) => a.tier - b.tier || a.i - b.i);
+    const straight: string[] = [], circuit: string[] = [];
+    for (const { e, tier } of ordered) {
       const load = e.weight ? `${e.weight}` : e.pin ?? "bodyweight";
       // A strength goal earns the next load after two clean sessions, not three.
       const bump = progression(sets, e.exercise, e.weight, level,
@@ -984,9 +1018,18 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
       // A short last session (one heavy single, a cut-short day) is not the
       // program: the prescription is at least the default set count.
       const nSets = Math.max(e.sets, opts.defaultSets ?? DEFAULT_TUNABLES.default_sets);
-      items.push(`${e.exercise} — ${nSets} x ${e.reps ?? "–"} @ ${load}` +
-                 (bump ? `  ↑ go to ${bump}` : ""));
+      (tier >= 2 ? circuit : straight).push(
+        `${e.exercise} — ${nSets} x ${e.reps ?? "–"} @ ${load}` + (bump ? `  ↑ go to ${bump}` : ""));
     }
+    // One lone accessory is not a circuit; it just goes on the end.
+    if (circuit.length === 1) straight.push(circuit.pop()!);
+    if (straight.length)
+      blocks.push({ title: "Straight sets", items: straight,
+                    note: "All sets of one lift before the next. Rest 2–3 min between sets on the compounds." });
+    if (circuit.length)
+      blocks.push({ title: "Mini circuit", items: circuit,
+                    note: "One set of each, then round again. About a minute between rounds." });
+    items.push(...straight, ...circuit);
   }
 
   if (planned === "run" || (planned.endsWith("+run") && level === "green")) {
@@ -1019,10 +1062,16 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
            "HRV has been below its band. Slow breathing is the best-evidenced " +
            "way to raise RMSSD: 5-15 ms over 4-6 weeks."];
 
-  if (level === "red") return { items: ["Walk if you want to move."], source_date: null, add: null, hold: true };
+  if (level === "red")
+    return { items: ["Walk if you want to move."], blocks: [], source_date: null, add: null, hold: true };
+
+  // Whatever is not a lift -- the run, the sport, strides -- is its own block.
+  const rest = items.filter((i) => !blocks.some((b) => b.items.includes(i)));
+  if (rest.length) blocks.push({ title: blocks.length ? "Also today" : null, note: null, items: rest });
 
   return {
     items,
+    blocks,
     source_date: source,
     add: add ? { name: add[0], dose: add[1], why: add[2] } : null,
     hold: level !== "green",

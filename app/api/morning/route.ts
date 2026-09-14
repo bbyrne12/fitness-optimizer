@@ -268,7 +268,8 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
                             { hrvStreak: state.hrv_low_streak,
                               intervalsReady: ready.intervals,
                               easyMinutes: plan.easy_run_minutes, personal,
-                              defaultSets: tun.default_sets });
+                              defaultSets: tun.default_sets,
+                              muscleOf: (n) => alias(n)?.primary_muscle });
   const dist = intensityDistribution(state._workouts as any, state.date);
   // Phase follows weeks actually trained, not weeks elapsed.
   const meso = mesocycle(consistency, inputs.race ? plan.weeks_out : Infinity);

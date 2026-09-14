@@ -16,6 +16,7 @@ const SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-s
 
 type Session = {
   items: string[];
+  blocks?: { title: string | null; note: string | null; items: string[] }[];
   add: { name: string; dose: string; why: string } | null;
   hold: boolean;
 };
@@ -31,9 +32,16 @@ export function renderEmail(opts: {
   const c = STATE[dec.level];
   const badge = { green: "GO", yellow: "MODIFY", red: "HOLD" }[dec.level] ?? "";
 
-  const rows = ses.items
-    .map((i) => `<div style="font:400 14px ${MONO};color:${FG};padding:7px 0;border-bottom:1px solid ${LINE}">${i}</div>`)
-    .join("");
+  const row = (i: string) =>
+    `<div style="font:400 14px ${MONO};color:${FG};padding:7px 0;border-bottom:1px solid ${LINE}">${i}</div>`;
+  // Lifts come grouped: the compounds as straight sets, the small stuff as a
+  // circuit. Each group gets a heading saying how to run it.
+  const blocks = ses.blocks?.length ? ses.blocks : [{ title: null, note: null, items: ses.items }];
+  const rows = blocks.map((b) =>
+    (b.title
+      ? `<div style="font:500 9px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:${DIM};padding:14px 0 2px">${b.title}</div>` +
+        (b.note ? `<div style="font:400 11px ${SANS};color:${MUTED};padding-bottom:4px">${b.note}</div>` : "")
+      : "") + b.items.map(row).join("")).join("");
 
   const add = ses.add
     ? `<div style="border:1px solid #3f4d1f;background:#141a0c;padding:12px 14px;margin-top:16px">
