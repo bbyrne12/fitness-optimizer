@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import {
   Card,
   CardContent,
@@ -20,8 +22,19 @@ export default function Page() {
             </CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground">
-                You&apos;ve successfully signed up. Please check your email to
-                confirm your account before signing in.
+                Click the link in the email to confirm your account. It can
+                take a minute, and it may land in spam.
+              </p>
+              <p className="mt-4 text-sm text-muted-foreground">
+                No email after a few minutes? You may already have an account.{" "}
+                <Link href="/auth/login" className="underline underline-offset-4">
+                  Sign in
+                </Link>{" "}
+                or{" "}
+                <Link href="/auth/forgot-password" className="underline underline-offset-4">
+                  reset your password
+                </Link>
+                .
               </p>
             </CardContent>
           </Card>

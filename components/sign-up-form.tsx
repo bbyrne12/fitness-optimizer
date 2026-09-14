@@ -24,6 +24,7 @@ export function SignUpForm({
   const [password, setPassword] = useState("");
   const [repeatPassword, setRepeatPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [exists, setExists] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
@@ -32,6 +33,7 @@ export function SignUpForm({
     const supabase = createClient();
     setIsLoading(true);
     setError(null);
+    setExists(false);
 
     if (password !== repeatPassword) {
       setError("Passwords do not match");
@@ -40,7 +42,7 @@ export function SignUpForm({
     }
 
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -48,6 +50,14 @@ export function SignUpForm({
         },
       });
       if (error) throw error;
+      // Supabase answers a sign-up for an address that already has an account
+      // with a success and no email, so nobody can use the form to find out
+      // who is registered. The tell is a user with no identities. Say so,
+      // rather than sending them to wait for an email that never comes.
+      if (data.user && data.user.identities?.length === 0) {
+        setExists(true);
+        return;
+      }
       router.push("/auth/sign-up-success");
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred");
@@ -102,6 +112,21 @@ export function SignUpForm({
                 />
               </div>
               {error && <p className="text-sm text-red-500">{error}</p>}
+              {exists && (
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                  <p className="font-medium">An account with this email already exists.</p>
+                  <p className="mt-1 text-muted-foreground">
+                    <Link href="/auth/login" className="underline underline-offset-4">
+                      Sign in
+                    </Link>{" "}
+                    with your password, or{" "}
+                    <Link href="/auth/forgot-password" className="underline underline-offset-4">
+                      reset it
+                    </Link>{" "}
+                    if you have forgotten it.
+                  </p>
+                </div>
+              )}
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? "Creating an account..." : "Sign up"}
               </Button>
