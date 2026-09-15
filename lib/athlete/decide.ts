@@ -357,6 +357,11 @@ export function dayKinds(w: Rec, sets: LoggedSet[]): Record<string, string[]> {
   }
   for (const [d, kind] of Object.entries(liftKindByDay(sets)))
     if (d in out) out[d].push(`lift:${kind}`);
+  // A WHOOP "weightlifting" entry on a day with a logged lift is that lift,
+  // recorded twice, not a second session.
+  for (const d of Object.keys(out))
+    if (out[d].some((k) => k.startsWith("lift:")))
+      out[d] = out[d].filter((k) => k !== "sport:weightlifting" && k !== "sport:functional_fitness");
   return out;
 }
 

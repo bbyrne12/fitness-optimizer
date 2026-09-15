@@ -267,6 +267,13 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
   const personal = personalFrom(cfg);
   personal.activityCosts = activityCosts(inputs.activities, sports, tun);
   personal.sessionCosts = sessionCosts;
+  // One set of numbers: an activity's cost is its learned one where that has
+  // enough mornings behind it, unless the profile pins it.
+  for (const a of inputs.activities) {
+    const learned = sessionCosts[`sport:${a.sport}`];
+    if (learned && learned.source === "measured" && personal.activityCosts[a.sport]?.source !== "profile")
+      personal.activityCosts[a.sport] = learned;
+  }
   const template = weekTemplate(inputs);
   const z2 = inputs.zone2;
   const decision = decide(state, plan, template, tun, z2, personal);
