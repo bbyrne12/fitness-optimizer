@@ -15,13 +15,14 @@ import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { admin, retrying } from "@/lib/athlete/supabase";
-import { accessToken, body, pull } from "@/lib/athlete/whoop";
+import { accessToken, body, pull, pullHistory } from "@/lib/athlete/whoop";
 import { renderEmail, sendEmail } from "@/lib/athlete/email";
 import {
   buildState, racePlan, weekTemplate, decide, prescribe,
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
   runConsistencyWeeks, readiness, mesocycle, personalFrom, planInputs,
   whoopSportDays, mergeSportDays, summarizeSportDays, activityCosts,
+  dayKinds, measureKindDays, learnedCosts, kindLabel, MIN_MEASURED,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
@@ -214,6 +215,16 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
   // most once a day, so the setup page and calendar never call WHOOP.
   const sportDays = mergeSportDays(cfg.whoop_summary?.sport_days ?? {}, whoopSportDays(w));
   const sports = summarizeSportDays(sportDays);
+  // The same measurement for every kind of day the plan can schedule -- lifts
+  // from the log, runs and sports from WHOOP, rest -- accumulated across the
+  // whole history so the engine keeps learning what each one costs this
+  // athlete. This is what the decision reads its costs from.
+  // The first time, read the whole WHOOP history (about two years) so the
+  // learning starts from everything, not the last four months; after that
+  // the daily pull adds each new morning.
+  const hist = cfg.learned?.kind_days ? w : await pullHistory(at).catch(() => w);
+  const kindDays = mergeSportDays(cfg.learned?.kind_days ?? {}, measureKindDays(hist, dayKinds(hist, sets)));
+  const sessionCosts = learnedCosts(kindDays, tun, planInputs(cfg).activities);
   if (offset !== cfg.utc_offset_minutes || cfg.whoop_summary?.updated !== state.date) {
     const measured = cfg.whoop_summary?.max_heart_rate ? null : await body(at).catch(() => null);
     await retrying(() => db.from("athlete_profile").update({ config: {
@@ -227,6 +238,7 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
         resting_heart_rate: state.rhr ?? null,
         ...(measured?.max_heart_rate ? { max_heart_rate: measured.max_heart_rate } : {}),
       },
+      learned: { updated: state.date, kind_days: kindDays, costs: sessionCosts },
     } }).eq("user_id", userId));
   }
 
@@ -254,6 +266,7 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
   const plan = racePlan(inputs.race, state.date, recentLong, inputs.longestRunMi);
   const personal = personalFrom(cfg);
   personal.activityCosts = activityCosts(inputs.activities, sports, tun);
+  personal.sessionCosts = sessionCosts;
   const template = weekTemplate(inputs);
   const z2 = inputs.zone2;
   const decision = decide(state, plan, template, tun, z2, personal);
@@ -288,7 +301,16 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
       ({ id, title, source, confidence, reviewed })),
     tunables: tun,
     activity_costs: personal.activityCosts,
+    session_costs: sessionCosts,
   };
+
+  // The kinds of day the athlete actually has, once each has enough mornings
+  // behind it to mean something. Plain days first, pairs after.
+  const learnedLines = Object.entries(sessionCosts)
+    .filter(([, c]) => c.n >= MIN_MEASURED)
+    .sort((a, b) => a[0].includes("+") === b[0].includes("+") ? b[1].n - a[1].n : a[0].includes("+") ? 1 : -1)
+    .slice(0, 8)
+    .map(([kind, c]) => ({ label: kindLabel(kind), value: c.value, n: c.n }));
 
   if (opts.dry) return { user_id: userId, sent: false, dry: true, ...payload };
 
@@ -301,6 +323,7 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
     decision, session,
     dashboardUrl: cfg.dashboard_url ?? `${opts.origin}/calendar`,
     phase: { phase: meso.phase, job: meso.job, recovery_week: meso.recovery_week },
+    learned: learnedLines,
   });
   const { id } = await sendEmail(
     to, `${decision.call}  (${Math.round(state.recovery)}% recovered)`, html);

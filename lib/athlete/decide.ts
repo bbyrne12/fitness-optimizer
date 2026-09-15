@@ -172,6 +172,10 @@ export type Personal = {
   activities: Activity[];
   /** What each activity costs this athlete; filled in with activityCosts(). */
   activityCosts: Record<string, ActivityCost>;
+  /** What every kind of training day costs this athlete, learned from their
+   *  own mornings; filled in with learnedCosts(). Keys are session kinds:
+   *  "lift:legs", "run:easy", "sport:lacrosse", "rest", "lift:pull+run:easy". */
+  sessionCosts: Record<string, ActivityCost>;
 };
 
 /** "18:00" -> "6pm", "18:30" -> "6:30pm". Anything unparseable passes through. */
@@ -197,6 +201,7 @@ export function personalFrom(cfg: Record<string, any>): Personal {
     focusMuscles: Array.isArray(cfg.focus_muscles) ? cfg.focus_muscles.map(String) : [],
     activities: inputs.activities,
     activityCosts: {},
+    sessionCosts: {},
   };
 }
 
@@ -255,7 +260,7 @@ const sd = (xs: number[]) => {
 /** Sessions that barely register the next morning and would muddy a sport's cost. */
 const BACKGROUND = new Set(["walking", "meditation", "activity", "yoga", "stretching"]);
 /** Below this many clean sessions a measured cost is noise, and is not used. */
-const MIN_MEASURED = 5;
+export const MIN_MEASURED = 5;
 /** Stand-in costs, by how hard the athlete rates the activity. */
 export const INTENSITY_COST: Record<Intensity, number> = { easy: -1, moderate: -3, hard: -5 };
 
@@ -271,28 +276,37 @@ export type SportDays = Record<string, Record<string, number | null>>;
  * happened in between). Only days where that sport was the one real session
  * are measured, so a run and a match on the same day are not blamed on either.
  */
-export function whoopSportDays(w: Rec): SportDays {
+function recoveryByDay(w: Rec): Record<string, number> {
   const rec: Record<string, number> = {};
   for (const r of w.recovery ?? [])
     if (r.score?.recovery_score != null) rec[localDay(r.created_at)] = r.score.recovery_score;
+  return rec;
+}
+
+/** Tomorrow's recovery as mean reversion alone predicts it from today's: the
+ *  baseline every session is measured against. Null until there are twenty
+ *  consecutive-morning pairs to fit it on. */
+function meanReversion(rec: Record<string, number>): ((today: number) => number) | null {
+  const pairs: [number, number][] = [];
+  for (const d of Object.keys(rec))
+    if (rec[shift(d, 1)] != null) pairs.push([rec[d], rec[shift(d, 1)]]);
+  if (pairs.length < 20) return null;
+  const mx = mean(pairs.map((p) => p[0]));
+  const my = mean(pairs.map((p) => p[1]));
+  const sxx = pairs.reduce((a, [x]) => a + (x - mx) ** 2, 0);
+  const slope = sxx ? pairs.reduce((a, [x, y]) => a + (x - mx) * (y - my), 0) / sxx : 0;
+  return (today) => slope * today + (my - slope * mx);
+}
+
+export function whoopSportDays(w: Rec): SportDays {
+  const rec = recoveryByDay(w);
 
   const sportsByDay: Record<string, Set<string>> = {};
   for (const x of w.workouts ?? [])
     if (x.sport_name)
       (sportsByDay[localDay(x.start, x.timezone_offset)] ??= new Set()).add(String(x.sport_name));
 
-  const pairs: [number, number][] = [];
-  for (const d of Object.keys(rec))
-    if (rec[shift(d, 1)] != null) pairs.push([rec[d], rec[shift(d, 1)]]);
-
-  let predict: ((today: number) => number) | null = null;
-  if (pairs.length >= 20) {
-    const mx = mean(pairs.map((p) => p[0]));
-    const my = mean(pairs.map((p) => p[1]));
-    const sxx = pairs.reduce((a, [x]) => a + (x - mx) ** 2, 0);
-    const slope = sxx ? pairs.reduce((a, [x, y]) => a + (x - mx) * (y - my), 0) / sxx : 0;
-    predict = (today) => slope * today + (my - slope * mx);
-  }
+  const predict = meanReversion(rec);
 
   const out: SportDays = {};
   for (const [d, sports] of Object.entries(sportsByDay)) {
@@ -303,6 +317,122 @@ export function whoopSportDays(w: Rec): SportDays {
       (out[s] ??= {})[d] = measurable ? Math.round((next - predict!(rec[d])) * 10) / 10 : null;
   }
   return out;
+}
+
+/* ------------------------------------------------------------- learning */
+
+/** The lift kind of each logged day: "legs", "push" or "pull". */
+export function liftKindByDay(sets: LoggedSet[]): Record<string, string> {
+  const byDay = volumeByDay(sets);
+  const out: Record<string, string> = {};
+  for (const [d, vol] of Object.entries(byDay)) {
+    if (Object.values(vol).reduce((a, b) => a + b, 0) < 2) continue;
+    const k = classifyDay(vol);
+    out[d] = k.startsWith("legs") ? "legs" : k;
+  }
+  return out;
+}
+
+/** A run of this length or more counts as the long run, not an easy one. */
+const LONG_RUN_MIN = 45;
+
+/**
+ * What the athlete did on each day the WHOOP history covers: lifts from their
+ * log, runs and sports from WHOOP, and "rest" for a day with none of them.
+ * These are the things the plan schedules, so they are the things worth
+ * knowing the price of.
+ */
+export function dayKinds(w: Rec, sets: LoggedSet[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const d of Object.keys(recoveryByDay(w))) out[d] = [];
+  for (const x of w.workouts ?? []) {
+    const sport = String(x.sport_name ?? "");
+    if (!sport || BACKGROUND.has(sport)) continue;
+    const d = localDay(x.start, x.timezone_offset);
+    if (!(d in out)) continue;
+    if (sport === "running") {
+      const min = (Date.parse(x.end) - Date.parse(x.start)) / 60_000;
+      out[d].push(min >= LONG_RUN_MIN ? "run:long" : "run:easy");
+    } else out[d].push(`sport:${sport}`);
+  }
+  for (const [d, kind] of Object.entries(liftKindByDay(sets)))
+    if (d in out) out[d].push(`lift:${kind}`);
+  return out;
+}
+
+/**
+ * What each kind of day cost, day by day: the next morning's recovery against
+ * what mean reversion alone predicts. A day with two things on it is measured
+ * as the pair ("lift:pull+run:easy"), never as either alone, so a run and a
+ * lift do not get blamed for each other. A day with nothing is "rest", which
+ * is worth measuring too: it is what everything else is compared to.
+ */
+export function measureKindDays(w: Rec, kinds: Record<string, string[]>): SportDays {
+  const rec = recoveryByDay(w);
+  const predict = meanReversion(rec);
+  const out: SportDays = {};
+  for (const [d, ks] of Object.entries(kinds)) {
+    const key = [...new Set(ks)].sort().join("+") || "rest";
+    const next = rec[shift(d, 1)];
+    const measurable = predict && rec[d] != null && next != null;
+    (out[key] ??= {})[d] = measurable ? Math.round((next - predict!(rec[d])) * 10) / 10 : null;
+  }
+  return out;
+}
+
+/** Days of the athlete's own history a default is worth. Four means a single
+ *  bad morning barely moves the number; twenty measured days all but replace
+ *  the default. */
+const PRIOR_WEIGHT = 4;
+
+/** The default cost of a kind of day before the athlete's own history says
+ *  otherwise. Pairs add. Sports take the intensity the athlete gave them. */
+export function priorCost(kind: string, tun: Tunables, activities: Activity[]): number {
+  return kind.split("+").reduce((sum, k) => {
+    if (k === "rest") return sum + 2;
+    if (k === "run:easy") return sum + Math.max(tun.cost_running, -6);
+    if (k === "run:long") return sum + tun.cost_running;
+    if (k === "lift:legs") return sum + tun.cost_legs_quad;
+    if (k.startsWith("lift:")) return sum + tun.cost_lift_upper;
+    if (k.startsWith("sport:")) {
+      const a = activities.find((x) => `sport:${x.sport}` === k);
+      return sum + (a ? INTENSITY_COST[a.intensity] : -3);
+    }
+    return sum;
+  }, 0);
+}
+
+/**
+ * The cost of every kind of day this athlete has had, blended: the default
+ * until their own mornings say otherwise, then more and more their own number.
+ * An explicit `cost_<kind>` in the profile's tunables wins outright.
+ */
+export function learnedCosts(days: SportDays, tun: Tunables, activities: Activity[]):
+    Record<string, ActivityCost> {
+  const out: Record<string, ActivityCost> = {};
+  const tunables = tun as unknown as Record<string, unknown>;
+  for (const [kind, byDay] of Object.entries(days)) {
+    const res = Object.values(byDay).filter((v): v is number => v != null);
+    const override = tunables[`cost_${kind.replace(/[^a-z0-9]+/g, "_")}`];
+    const prior = priorCost(kind, tun, activities);
+    const n = res.length;
+    if (typeof override === "number") { out[kind] = { value: override, n, source: "profile" }; continue; }
+    const value = Math.round(((n * mean(res) + PRIOR_WEIGHT * prior) / (n + PRIOR_WEIGHT)) * 10) / 10;
+    out[kind] = { value, n, source: n >= MIN_MEASURED ? "measured" : "default" };
+  }
+  return out;
+}
+
+/** "lift:pull+run:easy" -> "Pull lift + easy run". */
+export function kindLabel(kind: string): string {
+  return kind.split("+").map((k) => {
+    if (k === "rest") return "Rest day";
+    if (k === "run:easy") return "easy run";
+    if (k === "run:long") return "long run";
+    if (k.startsWith("lift:")) return `${LIFT_LABEL[k.slice(5)] ?? k.slice(5)} lift`.replace("Leg day lift", "Leg day").replace(" lift lift", " lift");
+    if (k.startsWith("sport:")) return k.slice(6).replace(/_/g, " ");
+    return k;
+  }).join(" + ").replace(/^./, (c) => c.toUpperCase());
 }
 
 /** Joins two stretches of history. A measured day beats an unmeasured one, and
@@ -1138,6 +1268,17 @@ export function decide(state: ReturnType<typeof buildState>,
   const activity = personal.activities.find((a) => a.sport === planned);
   const longRunDow = DOW.find((d) => template[d]?.[0] === "long run");
 
+  // What a kind of day costs this athlete: their own learned number where it
+  // exists, the default otherwise. Text says which.
+  const learned = (kind: string, fallback: number) =>
+    personal.sessionCosts[kind] ?? { value: fallback, n: 0, source: "default" as const };
+  const costText = (c: ActivityCost) =>
+    `about ${Math.abs(c.value).toFixed(c.n >= MIN_MEASURED ? 1 : 0)} recovery points` +
+    (c.source === "measured" ? ` (measured from ${c.n} of your days)` : "");
+  const runCost = learned("run:easy", Math.max(tun.cost_running, -6));
+  const liftCost = lift ? learned(`lift:${lift === "upper" || lift === "full body" ? "push" : lift}`,
+                                  lift === "legs" ? tun.cost_legs_quad : tun.cost_lift_upper) : null;
+
   if (level === "red") {
     call = planned === "rest" ? "Rest, as planned." : "Rest today.";
     detail = "Walk if you want to move. Nothing that adds strain.";
@@ -1169,29 +1310,36 @@ export function decide(state: ReturnType<typeof buildState>,
   } else if (hasEasyRun(planned) && overCap && level !== "green") {
     call = lift ? `${LIFT_LABEL[lift]} only.` : "Rest the legs today.";
     detail = `You are already at this week's running cap (${tw} min vs ${lw} last week). Sudden volume jumps are where running injuries come from; the build holds.`;
-  } else if (lift && hasEasyRun(planned) && level !== "green") {
-    call = `${LIFT_LABEL[lift]} only. Skip the run.`;
-    detail = `Amber, so the run goes. The lift costs about ${Math.abs(tun.cost_lift_upper).toFixed(1)} recovery points; the run costs ${Math.abs(tun.cost_running).toFixed(0)}.`;
+  } else if (lift && liftCost && hasEasyRun(planned) && level !== "green") {
+    // Amber: one of the two goes, and it is whichever costs this athlete more.
+    if (runCost.value <= liftCost.value) {
+      call = `${LIFT_LABEL[lift]} only. Skip the run.`;
+      detail = `Amber, so the run goes: it costs you ${costText(runCost)}, the lift ${costText(liftCost)}.`;
+    } else {
+      call = `Easy run only. Skip the lift.`;
+      detail = `Amber, so the lift goes: it costs you ${costText(liftCost)}, the run ${costText(runCost)}. Under ${z2} bpm.`;
+    }
   } else if (hasEasyRun(planned)) {
     call = level === "green" ? "Easy run, 25–30 minutes." : "Easy run, 20 minutes, or skip it.";
-    detail = `Under ${z2} bpm. Running costs you ${Math.abs(tun.cost_running).toFixed(0)} recovery points at your old intensity — zone 2 is the experiment.`;
+    detail = `Under ${z2} bpm. An easy run costs you ${costText(runCost)}` +
+      (runCost.source === "measured" ? "." : " — zone 2 is the experiment.");
     if (lift) detail += lift === "pull"
       ? " Pull lift too: rows, and add a vertical pull."
       : ` ${LIFT_LABEL[lift]} too.`;
   } else if (planned === "legs") {
     call = "Leg day.";
     detail = level === "green"
-      ? `Quad day costs about 3.5 recovery points.${longRunDow ? ` ${DAY_NAME[longRunDow]} is far enough away.` : ""}`
+      ? `Leg day costs you ${costText(learned("lift:legs", tun.cost_legs_quad))}.${longRunDow ? ` ${DAY_NAME[longRunDow]} is far enough away.` : ""}`
       : "Amber recovery. Same session, no load increase.";
   } else if (lift && lift !== "push") {
     call = `${LIFT_LABEL[lift]}.`;
     detail = personal.cues[lift] ?? (lift === "full body"
       ? "One session across the whole body; what leads rotates each time."
-      : "Upper body only — the cheapest session of the week.");
+      : `Upper body only — costs you ${costText(liftCost!)}.`);
     if (level !== "green") detail = `Hold at current weights. ${detail}`;
   } else {
     call = "Push lift.";
-    detail = personal.cues.push ?? "Upper body only — the cheapest session of the week.";
+    detail = personal.cues.push ?? `Upper body only — costs you ${costText(learned("lift:push", tun.cost_lift_upper))}.`;
     if (level !== "green") detail = `Hold at current weights. ${detail}`;
   }
 
