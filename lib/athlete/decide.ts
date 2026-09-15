@@ -173,8 +173,8 @@ export type Personal = {
   /** What each activity costs this athlete; filled in with activityCosts(). */
   activityCosts: Record<string, ActivityCost>;
   /** What every kind of training day costs this athlete, learned from their
-   *  own mornings; filled in with learnedCosts(). Keys are session kinds:
-   *  "lift:legs", "run:easy", "sport:lacrosse", "rest", "lift:pull+run:easy". */
+   *  own mornings; filled in with fitCosts(). Keys are session kinds:
+   *  "lift:legs", "run:zone2", "sport:lacrosse", "lift:pull+run:zone2". */
   sessionCosts: Record<string, ActivityCost>;
 };
 
@@ -333,16 +333,41 @@ export function liftKindByDay(sets: LoggedSet[]): Record<string, string> {
   return out;
 }
 
-/** A run of this length or more counts as the long run, not an easy one. */
+/** A zone 2 run of this length or more is the long run. */
 const LONG_RUN_MIN = 45;
 
 /**
- * What the athlete did on each day the WHOOP history covers: lifts from their
- * log, runs and sports from WHOOP, and "rest" for a day with none of them.
- * These are the things the plan schedules, so they are the things worth
- * knowing the price of.
+ * Which bucket a run falls in, for this athlete: zone 2, long (zone 2 and
+ * long enough), or hard. By average heart rate against their own zone 2
+ * ceiling when they have set one; otherwise by WHOOP's own heart-rate zones
+ * for them, which are already scaled to their max. Duration never decides
+ * intensity. A run with no heart-rate data counts as hard, the safe guess.
  */
-export function dayKinds(w: Rec, sets: LoggedSet[]): Record<string, string[]> {
+export function runKind(x: Rec, zone2: number | null | undefined): string {
+  const min = (Date.parse(x.end) - Date.parse(x.start)) / 60_000;
+  const sc = x.score ?? {};
+  let easy: boolean | null = null;
+  if (zone2 && sc.average_heart_rate) easy = sc.average_heart_rate <= zone2 + 3;
+  else {
+    const z = sc.zone_durations ?? sc.zone_duration;
+    if (z) {
+      const tot = Object.values(z as Record<string, number>).reduce((a, b) => a + (b ?? 0), 0);
+      if (tot > 0)
+        easy = ((z.zone_zero_milli ?? 0) + (z.zone_one_milli ?? 0) + (z.zone_two_milli ?? 0)) / tot >= 0.7;
+    }
+  }
+  if (easy !== true) return "run:hard";
+  return min >= LONG_RUN_MIN ? "run:long" : "run:zone2";
+}
+
+/**
+ * What the athlete did on each day the WHOOP history covers: lifts from their
+ * log, runs and sports from WHOOP, nothing for a rest day. These are the
+ * things the plan schedules, so they are the things worth knowing the price
+ * of. A WHOOP "weightlifting" entry on a day with a logged lift is that lift,
+ * recorded twice, not a second session.
+ */
+export function dayKinds(w: Rec, sets: LoggedSet[], zone2?: number | null): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   for (const d of Object.keys(recoveryByDay(w))) out[d] = [];
   for (const x of w.workouts ?? []) {
@@ -350,39 +375,73 @@ export function dayKinds(w: Rec, sets: LoggedSet[]): Record<string, string[]> {
     if (!sport || BACKGROUND.has(sport)) continue;
     const d = localDay(x.start, x.timezone_offset);
     if (!(d in out)) continue;
-    if (sport === "running") {
-      const min = (Date.parse(x.end) - Date.parse(x.start)) / 60_000;
-      out[d].push(min >= LONG_RUN_MIN ? "run:long" : "run:easy");
-    } else out[d].push(`sport:${sport}`);
+    out[d].push(sport === "running" ? runKind(x, zone2) : `sport:${sport}`);
   }
   for (const [d, kind] of Object.entries(liftKindByDay(sets)))
     if (d in out) out[d].push(`lift:${kind}`);
-  // A WHOOP "weightlifting" entry on a day with a logged lift is that lift,
-  // recorded twice, not a second session.
   for (const d of Object.keys(out))
     if (out[d].some((k) => k.startsWith("lift:")))
       out[d] = out[d].filter((k) => k !== "sport:weightlifting" && k !== "sport:functional_fitness");
   return out;
 }
 
+/** One morning the model learns from: what the day held, the recovery it
+ *  started from, the recovery it led to, and the night's sleep in between. */
+export type DayRow = {
+  kind: string;
+  rec: number;
+  next: number;
+  /** Sleep performance the next morning, 0-100, when WHOOP scored it. */
+  sleep_perf: number | null;
+  /** Hours actually asleep that night. */
+  sleep_h: number | null;
+};
+
 /**
- * What each kind of day cost, day by day: the next morning's recovery against
- * what mean reversion alone predicts. A day with two things on it is measured
- * as the pair ("lift:pull+run:easy"), never as either alone, so a run and a
- * lift do not get blamed for each other. A day with nothing is "rest", which
- * is worth measuring too: it is what everything else is compared to.
+ * The rows the model fits on. A day with two things on it is the pair
+ * ("lift:pull+run:zone2"), never either alone, so a run and a lift are not
+ * blamed for each other. A day with nothing is "rest": the baseline every
+ * other kind is measured against.
  */
-export function measureKindDays(w: Rec, kinds: Record<string, string[]>): SportDays {
+export function learnRows(w: Rec, kinds: Record<string, string[]>): Record<string, DayRow> {
   const rec = recoveryByDay(w);
-  const predict = meanReversion(rec);
-  const out: SportDays = {};
+  const night: Record<string, { sleep_perf: number | null; sleep_h: number | null }> = {};
+  for (const sl of w.sleep ?? []) {
+    if (!sl.score || sl.nap) continue;
+    const st = sl.score.stage_summary ?? {};
+    const asleep = st.total_in_bed_time_milli != null
+      ? ((st.total_in_bed_time_milli ?? 0) - (st.total_awake_time_milli ?? 0)) / 3.6e6 : null;
+    night[localDay(sl.end, sl.timezone_offset)] = {
+      sleep_perf: sl.score.sleep_performance_percentage ?? null,
+      sleep_h: asleep != null ? Math.round(asleep * 10) / 10 : null,
+    };
+  }
+  const out: Record<string, DayRow> = {};
   for (const [d, ks] of Object.entries(kinds)) {
-    const key = [...new Set(ks)].sort().join("+") || "rest";
-    const next = rec[shift(d, 1)];
-    const measurable = predict && rec[d] != null && next != null;
-    (out[key] ??= {})[d] = measurable ? Math.round((next - predict!(rec[d])) * 10) / 10 : null;
+    const nd = shift(d, 1);
+    if (rec[d] == null || rec[nd] == null) continue;
+    const n = night[nd] ?? { sleep_perf: null, sleep_h: null };
+    out[d] = { kind: [...new Set(ks)].sort().join("+") || "rest", rec: rec[d], next: rec[nd], ...n };
   }
   return out;
+}
+
+/** Solves A x = b for a small symmetric system; null if singular. */
+function solve(A: number[][], b: number[]): number[] | null {
+  const n = b.length;
+  const M = A.map((row, i) => [...row, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let piv = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    if (Math.abs(M[piv][c]) < 1e-9) return null;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    for (let r = 0; r < n; r++) {
+      if (r === c) continue;
+      const f = M[r][c] / M[c][c];
+      for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
+    }
+  }
+  return M.map((row, i) => row[n] / row[i]);
 }
 
 /** Days of the athlete's own history a default is worth. Four means a single
@@ -390,50 +449,109 @@ export function measureKindDays(w: Rec, kinds: Record<string, string[]>): SportD
  *  the default. */
 const PRIOR_WEIGHT = 4;
 
-/** The default cost of a kind of day before the athlete's own history says
- *  otherwise. Pairs add. Sports take the intensity the athlete gave them. */
+/** The default cost of a kind of day against a rest day, before the
+ *  athlete's own history says otherwise. Pairs add. Sports take the intensity
+ *  the athlete gave them. */
 export function priorCost(kind: string, tun: Tunables, activities: Activity[]): number {
   return kind.split("+").reduce((sum, k) => {
-    if (k === "rest") return sum + 2;
-    if (k === "run:easy") return sum + Math.max(tun.cost_running, -6);
-    if (k === "run:long") return sum + tun.cost_running;
-    if (k === "lift:legs") return sum + tun.cost_legs_quad;
-    if (k.startsWith("lift:")) return sum + tun.cost_lift_upper;
+    if (k === "rest") return sum;
+    if (k === "run:zone2") return sum - 4;
+    if (k === "run:long") return sum - 7;
+    if (k === "run:hard") return sum + tun.cost_running;
+    if (k === "lift:legs") return sum + tun.cost_legs_quad - 2;
+    if (k.startsWith("lift:")) return sum + tun.cost_lift_upper - 2;
     if (k.startsWith("sport:")) {
       const a = activities.find((x) => `sport:${x.sport}` === k);
-      return sum + (a ? INTENSITY_COST[a.intensity] : -3);
+      return sum + (a ? INTENSITY_COST[a.intensity] : -3) - 2;
     }
     return sum;
   }, 0);
 }
 
+export type LearnedCost = ActivityCost & { se?: number | null };
+
 /**
- * The cost of every kind of day this athlete has had, blended: the default
- * until their own mornings say otherwise, then more and more their own number.
- * An explicit `cost_<kind>` in the profile's tunables wins outright.
+ * What every kind of day costs this athlete, fit all at once: next morning's
+ * recovery on that morning's recovery, the night's sleep in between, and one
+ * term per kind of day, with a rest day as the baseline. So a bad night's
+ * sleep is charged to the sleep, not to whatever was trained, and each cost
+ * reads as "against a rest day, sleep held equal". Every cost is blended
+ * toward its default until the athlete's own mornings outweigh it, and
+ * carries a standard error. An explicit `cost_<kind>` in the profile's
+ * tunables wins outright.
  */
-export function learnedCosts(days: SportDays, tun: Tunables, activities: Activity[]):
-    Record<string, ActivityCost> {
-  const out: Record<string, ActivityCost> = {};
+export function fitCosts(rows: Record<string, DayRow>, tun: Tunables, activities: Activity[]):
+    Record<string, LearnedCost> {
+  const data = Object.values(rows);
+  const counts: Record<string, number> = {};
+  for (const r of data) if (r.kind !== "rest") counts[r.kind] = (counts[r.kind] ?? 0) + 1;
+  const kinds = Object.keys(counts).sort();
   const tunables = tun as unknown as Record<string, unknown>;
-  for (const [kind, byDay] of Object.entries(days)) {
-    const res = Object.values(byDay).filter((v): v is number => v != null);
+
+  // Fill the sleep terms with their means where WHOOP has no score, so a
+  // missing night costs a row nothing but its own information.
+  const sp = data.map((r) => r.sleep_perf).filter((v): v is number => v != null);
+  const sh = data.map((r) => r.sleep_h).filter((v): v is number => v != null);
+  const mSp = sp.length ? mean(sp) : 0, mSh = sh.length ? mean(sh) : 0;
+  const cols = 3 + kinds.length;
+  const X = data.map((r) => {
+    const row = new Array(cols).fill(0);
+    row[0] = 1; row[1] = r.rec; row[2] = (r.sleep_perf ?? mSp) - mSp;
+    const k = kinds.indexOf(r.kind); if (k >= 0) row[3 + k] = 1;
+    return row;
+  });
+  void mSh; void sh;
+  const y = data.map((r) => r.next);
+
+  let beta: number[] | null = null, se: number[] | null = null;
+  if (data.length >= 20 + kinds.length) {
+    const XtX = Array.from({ length: cols }, () => new Array(cols).fill(0));
+    const Xty = new Array(cols).fill(0);
+    for (let i = 0; i < X.length; i++)
+      for (let a = 0; a < cols; a++) {
+        Xty[a] += X[i][a] * y[i];
+        for (let b = 0; b < cols; b++) XtX[a][b] += X[i][a] * X[i][b];
+      }
+    for (let a = 0; a < cols; a++) XtX[a][a] += 1e-6;
+    beta = solve(XtX, Xty);
+    if (beta) {
+      const b = beta;
+      const rss = X.reduce((acc, row, i) => acc + (y[i] - row.reduce((s2, v, j) => s2 + v * b[j], 0)) ** 2, 0);
+      const sigma2 = rss / Math.max(1, X.length - cols);
+      se = new Array(cols).fill(null);
+      for (let j = 0; j < cols; j++) {
+        const e = new Array(cols).fill(0); e[j] = 1;
+        const col = solve(XtX, e);
+        if (col) se[j] = Math.sqrt(Math.max(0, sigma2 * col[j]));
+      }
+    }
+  }
+
+  const out: Record<string, LearnedCost> = {};
+  for (const kind of kinds) {
+    const n = counts[kind];
     const override = tunables[`cost_${kind.replace(/[^a-z0-9]+/g, "_")}`];
+    if (typeof override === "number") { out[kind] = { value: override, n, source: "profile", se: null }; continue; }
     const prior = priorCost(kind, tun, activities);
-    const n = res.length;
-    if (typeof override === "number") { out[kind] = { value: override, n, source: "profile" }; continue; }
-    const value = Math.round(((n * mean(res) + PRIOR_WEIGHT * prior) / (n + PRIOR_WEIGHT)) * 10) / 10;
-    out[kind] = { value, n, source: n >= MIN_MEASURED ? "measured" : "default" };
+    const j = 3 + kinds.indexOf(kind);
+    const coef = beta ? beta[j] : prior;
+    const value = Math.round(((n * coef + PRIOR_WEIGHT * prior) / (n + PRIOR_WEIGHT)) * 10) / 10;
+    out[kind] = {
+      value, n,
+      source: beta && n >= MIN_MEASURED ? "measured" : "default",
+      se: se?.[j] != null ? Math.round(se[j] * 10) / 10 : null,
+    };
   }
   return out;
 }
 
-/** "lift:pull+run:easy" -> "Pull lift + easy run". */
+/** "lift:pull+run:zone2" -> "Pull lift + zone 2 run". */
 export function kindLabel(kind: string): string {
   return kind.split("+").map((k) => {
     if (k === "rest") return "Rest day";
-    if (k === "run:easy") return "easy run";
+    if (k === "run:zone2") return "zone 2 run";
     if (k === "run:long") return "long run";
+    if (k === "run:hard") return "hard run";
     if (k.startsWith("lift:")) return `${LIFT_LABEL[k.slice(5)] ?? k.slice(5)} lift`.replace("Leg day lift", "Leg day").replace(" lift lift", " lift");
     if (k.startsWith("sport:")) return k.slice(6).replace(/_/g, " ");
     return k;
@@ -1335,8 +1453,8 @@ export function decide(state: ReturnType<typeof buildState>,
     personal.sessionCosts[kind] ?? { value: fallback, n: 0, source: "default" as const };
   const costText = (c: ActivityCost) =>
     `about ${Math.abs(c.value).toFixed(c.n >= MIN_MEASURED ? 1 : 0)} recovery points` +
-    (c.source === "measured" ? ` (measured from ${c.n} of your days)` : "");
-  const runCost = learned("run:easy", Math.max(tun.cost_running, -6));
+    (c.source === "measured" ? ` more than a rest day (from ${c.n} of your days)` : "");
+  const runCost = learned("run:zone2", -4);
   const liftCost = lift ? learned(`lift:${lift === "upper" || lift === "full body" ? "push" : lift}`,
                                   lift === "legs" ? tun.cost_legs_quad : tun.cost_lift_upper) : null;
 

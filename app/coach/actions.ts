@@ -71,7 +71,7 @@ How the plan works, so you can explain it:
 - Goals: hrv (raise HRV and recovery; slow breathing is added when HRV dips), race (a build to a race date, long run on the chosen weekend day), strength (loads progress after two clean sessions instead of three), general.
 - Week: activities are placed on their days first; the long run on Sat or Sun with a rest day after; lifts fill the remaining days by split (1 full body, 2 legs/upper, 3 legs/pull/push, 4 adds legs, 5 adds upper); runs stack onto pull or upper days when there is no free day.
 - Each morning: recovery 67%+ is green, under 34% is red, between is amber. Sleep debt, an HRV streak below the athlete's band, and resting heart rate over baseline can push it down. Amber holds weights; red is rest.
-- Learned costs: next-morning recovery points each kind of day costs this athlete, measured against their own mean reversion, relative to a typical day. Negative is a cost. Blended toward a default until there are at least five measured days.
+- Learned costs: next-morning recovery points each kind of day costs this athlete against a rest day, with that night's sleep held equal, fit on their whole WHOOP history. Negative is a cost. Blended toward a default until there are at least five measured days. Runs are bucketed by the athlete's own heart-rate zones (zone 2, long, hard), never by duration. Alcohol, illness and stress are not in the data, so a number is an estimate, and the athlete should not over-read small differences.
 - Loads come from the athlete's own log: the last session of that kind, with a bump once the same load has been done cleanly enough times, except lifts held at current weight.
 - Notes are read into structured fields (held lifts, per-session reminders) when they change.
 
@@ -105,7 +105,7 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
     const inputs = planInputs(cfg);
     const learned = Object.entries((cfg.learned?.costs ?? {}) as Record<string, { value: number; n: number }>)
       .filter(([, c]) => c.n >= 1)
-      .map(([k, c]) => ({ day: kindLabel(k), cost: c.value, measured_days: c.n }));
+      .map(([k, c]) => ({ day: kindLabel(k), cost_vs_rest_day: c.value, measured_days: c.n }));
     const dec = (latest?.decision ?? {}) as Record<string, any>;
     return {
       plan: {

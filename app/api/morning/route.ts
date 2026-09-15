@@ -22,7 +22,7 @@ import {
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
   runConsistencyWeeks, readiness, mesocycle, personalFrom, planInputs,
   whoopSportDays, mergeSportDays, summarizeSportDays, activityCosts,
-  dayKinds, measureKindDays, learnedCosts,
+  dayKinds, learnRows, fitCosts,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
@@ -222,9 +222,10 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
   // The first time, read the whole WHOOP history (about two years) so the
   // learning starts from everything, not the last four months; after that
   // the daily pull adds each new morning.
-  const hist = cfg.learned?.kind_days ? w : await pullHistory(at).catch(() => w);
-  const kindDays = mergeSportDays(cfg.learned?.kind_days ?? {}, measureKindDays(hist, dayKinds(hist, sets)));
-  const sessionCosts = learnedCosts(kindDays, tun, planInputs(cfg).activities);
+  const hist = cfg.learned?.days ? w : await pullHistory(at).catch(() => w);
+  const early = planInputs(cfg);
+  const learnedRows = { ...(cfg.learned?.days ?? {}), ...learnRows(hist, dayKinds(hist, sets, early.zone2)) };
+  const sessionCosts = fitCosts(learnedRows, tun, early.activities);
   if (offset !== cfg.utc_offset_minutes || cfg.whoop_summary?.updated !== state.date) {
     const measured = cfg.whoop_summary?.max_heart_rate ? null : await body(at).catch(() => null);
     await retrying(() => db.from("athlete_profile").update({ config: {
@@ -238,7 +239,7 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
         resting_heart_rate: state.rhr ?? null,
         ...(measured?.max_heart_rate ? { max_heart_rate: measured.max_heart_rate } : {}),
       },
-      learned: { updated: state.date, kind_days: kindDays, costs: sessionCosts },
+      learned: { updated: state.date, days: learnedRows, costs: sessionCosts },
     } }).eq("user_id", userId));
   }
 

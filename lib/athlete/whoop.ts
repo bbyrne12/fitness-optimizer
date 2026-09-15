@@ -175,7 +175,8 @@ async function page(path: string, at: string, cap = 400) {
 export async function pullHistory(at: string) {
   const recovery = await page("/v2/recovery", at, 750);
   const workouts = await page("/v2/activity/workout", at, 750);
-  return { recovery, workouts };
+  const sleep = await page("/v2/activity/sleep", at, 750);
+  return { recovery, workouts, sleep };
 }
 
 /** Height, weight and max heart rate, as WHOOP has them. */

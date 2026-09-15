@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 
 import { RoutineAnalysisCard } from "./analysis-card";
-import { LearnedCard } from "./learned-card";
 import { TodayCard } from "./today-card";
 
 function startOfWeekUtcIso(date: Date) {
@@ -224,7 +223,6 @@ async function DashboardContent({ searchParams }: { searchParams: Search }) {
       </header>
 
       <TodayCard />
-      <LearnedCard />
 
       <section className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <Card>
