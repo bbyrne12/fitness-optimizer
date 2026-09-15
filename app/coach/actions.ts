@@ -13,16 +13,24 @@ export type ChatMessage = { role: "user" | "assistant"; content: string };
 export type CoachReply = { reply: string; applied: string[]; error?: string };
 
 // The coach runs on the app's one API key, so what it may spend is capped
-// here as well as in the Console. Per athlete per day, and for everyone
-// together per day; both are messages, since a message is what a person
-// experiences. Override with the environment.
-const MODEL = process.env.COACH_MODEL ?? "claude-opus-5";
-const USER_DAILY = Number(process.env.COACH_USER_DAILY_MESSAGES ?? 40);
-const ALL_DAILY = Number(process.env.COACH_DAILY_MESSAGES ?? 300);
+// here as well as in the Console: dollars per athlete per day, and dollars
+// for everyone together per day. Kept low for the demo; raise with the
+// environment. Sonnet 5 keeps a turn around a cent.
+const MODEL = process.env.COACH_MODEL ?? "claude-sonnet-5";
+const USER_DAILY_USD = Number(process.env.COACH_USER_DAILY_USD ?? 0.25);
+const ALL_DAILY_USD = Number(process.env.COACH_DAILY_USD ?? 2);
+// Dollars per million tokens: input, output. Cache reads bill at a tenth of
+// input and cache writes at 1.25x.
+const PRICES: Record<string, [number, number]> = {
+  "claude-sonnet-5": [2, 10],
+  "claude-haiku-4-5": [1, 5],
+  "claude-opus-5": [5, 25],
+};
+const LIMIT_MESSAGE = "You've reached your daily spend limit for the coach. It resets tomorrow; the Setup page still edits everything directly.";
 const HISTORY = 20;
 const MAX_ROUNDS = 3;
 
-const TOOL: Anthropic.Beta.BetaTool = {
+const TOOL: Anthropic.Tool = {
   name: "update_plan",
   description:
     "Change the athlete's plan settings. Only include the fields being changed. " +
@@ -89,22 +97,24 @@ Rules:
 - Never invent an injury, result or number. If you do not know, say so.
 - Do not give medical advice beyond training adjustments; a persistent injury is a reason to see a clinician.`;
 
-type Usage = { day: string; messages: number; input_tokens: number; output_tokens: number };
+type Usage = { day: string; messages: number; input_tokens: number; output_tokens: number; usd: number };
 
 const today = () => new Date().toISOString().slice(0, 10);
 
 function usageOf(cfg: Record<string, any>): Usage {
   const u = cfg.coach_usage as Usage | undefined;
-  return u && u.day === today() ? u : { day: today(), messages: 0, input_tokens: 0, output_tokens: 0 };
+  return u && u.day === today()
+    ? { ...u, usd: u.usd ?? 0 }
+    : { day: today(), messages: 0, input_tokens: 0, output_tokens: 0, usd: 0 };
 }
 
-/** Everyone's coach messages today, for the shared cap. */
-async function messagesToday(): Promise<number> {
+/** Everyone's coach spend today, in dollars, for the shared cap. */
+async function spentToday(): Promise<number> {
   const { data } = await retrying(() => admin().from("athlete_profile").select("config->coach_usage"));
   const d = today();
   return (data ?? []).reduce((n: number, r: any) => {
     const u = r.coach_usage as Usage | null;
-    return n + (u && u.day === d ? u.messages : 0);
+    return n + (u && u.day === d ? u.usd ?? 0 : 0);
   }, 0);
 }
 
@@ -124,10 +134,8 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
 
   // Spend guards, before anything is sent.
   const usage = usageOf(cfg);
-  if (usage.messages >= USER_DAILY)
-    return { reply: "", applied: [], error: `That is today's limit of ${USER_DAILY} coach messages. It resets tomorrow; the Setup page edits everything directly.` };
-  if ((await messagesToday()) >= ALL_DAILY)
-    return { reply: "", applied: [], error: "The coach has reached its limit for today across everyone. Try tomorrow, or use the Setup page." };
+  if (usage.usd >= USER_DAILY_USD || (await spentToday()) >= ALL_DAILY_USD)
+    return { reply: "", applied: [], error: LIMIT_MESSAGE };
 
   const { data: latest } = await supabase
     .from("decision_log").select("day,decision").eq("user_id", user.id)
@@ -154,30 +162,30 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
         detail: dec.decision?.detail, reasons: dec.decision?.reasons, session: dec.session?.items } : null,
     }, null, 1);
   };
-  const system = (): Anthropic.Beta.BetaTextBlockParam[] => [
+  const system = (): Anthropic.TextBlockParam[] => [
     { type: "text", text: INSTRUCTIONS, cache_control: { type: "ephemeral" } },
     { type: "text", text: context() },
   ];
 
   const client = new Anthropic({ apiKey });
-  const messages: Anthropic.Beta.BetaMessageParam[] = [
+  const messages: Anthropic.MessageParam[] = [
     ...history.slice(-HISTORY).map((m) => ({ role: m.role, content: m.content })),
     { role: "user", content: text },
   ];
   const applied: string[] = [];
-  let inTok = 0, outTok = 0;
-  const account = (res: Anthropic.Beta.BetaMessage) => {
-    inTok += res.usage.input_tokens + (res.usage.cache_read_input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0);
-    outTok += res.usage.output_tokens;
+  let inTok = 0, outTok = 0, usd = 0;
+  const [pin, pout] = PRICES[MODEL] ?? PRICES["claude-sonnet-5"];
+  const account = (res: Anthropic.Message) => {
+    const u = res.usage;
+    const read = u.cache_read_input_tokens ?? 0, write = u.cache_creation_input_tokens ?? 0;
+    inTok += u.input_tokens + read + write;
+    outTok += u.output_tokens;
+    usd += (u.input_tokens * pin + read * pin * 0.1 + write * pin * 1.25 + u.output_tokens * pout) / 1e6;
   };
-  const ask = (maxTokens: number) => client.beta.messages.create({
+  const ask = (maxTokens: number) => client.messages.create({
     model: MODEL, max_tokens: maxTokens,
-    // A chat turn does not need deep deliberation; medium keeps replies quick.
-    output_config: { effort: "medium" },
-    // If a safety classifier declines a turn, the same request re-runs on the
-    // fallback model inside the call rather than leaving the athlete with nothing.
-    betas: ["server-side-fallback-2026-06-01"],
-    fallbacks: [{ model: "claude-opus-4-8" }],
+    // A chat turn does not need deep deliberation; low effort keeps it cheap and quick.
+    output_config: { effort: "low" },
     system: system(), tools: [TOOL], messages,
   });
 
@@ -188,7 +196,7 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
     // One round of tool use is enough for a plan change; the next call lets
     // the coach say what it did, with the result of applying it in hand.
     for (let round = 0; round < MAX_ROUNDS && res.stop_reason === "tool_use"; round++) {
-      const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
+      const results: Anthropic.ToolResultBlockParam[] = [];
       for (const block of res.content) {
         if (block.type !== "tool_use") continue;
         const patch = block.input as PlanPatch;
@@ -222,11 +230,12 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
 
     const reply = res.stop_reason === "refusal"
       ? "I can't help with that one. Anything about your training plan, ask away."
-      : res.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text").map((b) => b.text).join("\n").trim();
+      : res.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n").trim();
 
     // What this turn cost, on the athlete's profile: the per-day guard reads it.
     const next: Usage = { day: usage.day, messages: usage.messages + 1,
-      input_tokens: usage.input_tokens + inTok, output_tokens: usage.output_tokens + outTok };
+      input_tokens: usage.input_tokens + inTok, output_tokens: usage.output_tokens + outTok,
+      usd: Math.round((usage.usd + usd) * 10000) / 10000 };
     await supabase.from("athlete_profile").upsert(
       { user_id: user.id, config: { ...cfg, coach_usage: next }, updated_at: new Date().toISOString() },
       { onConflict: "user_id" });
