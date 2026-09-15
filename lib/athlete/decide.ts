@@ -1111,6 +1111,47 @@ export function exerciseTier(name: string, muscle?: string | null): number {
  *  straight sets, the small stuff as one mini circuit. */
 export type SessionBlock = { title: string | null; note: string | null; items: string[] };
 
+/** Core movements the plan adds when the athlete's own log has fewer than
+ *  three: one anti-extension, one anti-rotation, one hold. */
+const CORE_DEFAULTS: [RegExp, string][] = [
+  [/plank/, "Plank — 3 x 45 s"],
+  [/dead bug/, "Dead bug — 3 x 10 each side"],
+  [/pallof|anti.?rotation/, "Pallof press — 3 x 10 each side"],
+];
+
+/**
+ * The athlete's own core work, at their last loads: every core exercise in
+ * the log, most recent first, leaning on the last four months so a movement
+ * from two years ago does not outrank last week's. Filled to three or four
+ * movements with the defaults, so "core" is never just a word.
+ */
+export function coreCircuit(sets: LoggedSet[], today: string,
+                            muscleOf?: (name: string) => string | null | undefined): string[] {
+  const isCore = (name: string, muscle?: string | null) =>
+    exerciseTier(name, muscle) === 3 && !/calf|calves|tib|shin/.test(name.toLowerCase());
+  const last: Record<string, LoggedSet & { total: number }> = {};
+  for (const r of sets) {
+    const k = r.exercise.trim();
+    if (!isCore(k, muscleOf?.(k))) continue;
+    if (!last[k] || r.day > last[k].day) last[k] = { ...r, total: r.sets };
+    else if (r.day === last[k].day) last[k].total += r.sets;
+  }
+  const recent = shift(today, -120);
+  const own = Object.values(last)
+    .sort((a, b) => (a.day >= recent) === (b.day >= recent) ? b.day.localeCompare(a.day) : a.day >= recent ? -1 : 1)
+    .slice(0, 4)
+    // A hold was logged as a count of holds, not reps; it is prescribed as time.
+    .map((e) => /plank|hold/i.test(e.exercise)
+      ? `${e.exercise.trim()} — 3 x 45 s`
+      : `${e.exercise.trim()} — ${Math.max(e.total, 3)} x ${e.reps ?? "–"} @ ${e.weight ? e.weight : e.pin ?? "bodyweight"}`);
+  const items = [...own];
+  for (const [re, line] of CORE_DEFAULTS) {
+    if (items.length >= 4) break;
+    if (!own.some((o) => re.test(o.toLowerCase()))) items.push(line);
+  }
+  return items;
+}
+
 export function prescribe(sets: LoggedSet[], planned: string, level: string,
                           z2: number, longMi: number, opts: {
                             hrvStreak?: number; intervalsReady?: boolean;
@@ -1118,6 +1159,8 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
                             defaultSets?: number;
                             /** Primary muscle of a logged name, from the athlete's alias map. */
                             muscleOf?: (name: string) => string | null | undefined;
+                            /** The athlete's local date, for "recent". */
+                            today?: string;
                           } = {}) {
   const personal = opts.personal ?? personalFrom({});
   const items: string[] = [];
@@ -1203,6 +1246,19 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   // Whatever is not a lift -- the run, the sport, strides -- is its own block.
   const rest = items.filter((i) => !blocks.some((b) => b.items.includes(i)));
   if (rest.length) blocks.push({ title: blocks.length ? "Also today" : null, note: null, items: rest });
+
+  // "Ab circuit" becomes the athlete's own core exercises, at their loads,
+  // as a block of the session rather than a word in the addition.
+  if (add && /ab circuit|core/i.test(add[0])) {
+    const core = coreCircuit(sets, opts.today ?? new Date().toISOString().slice(0, 10), opts.muscleOf);
+    if (core.length) {
+      const own = core.filter((c) => !CORE_DEFAULTS.some(([, line]) => line === c)).length;
+      add = ["Core circuit", `${core.length} movements, 3 rounds, about 10 min`,
+             add[2] + (own ? " Your own exercises, at your last loads." : "")];
+      blocks.push({ title: "Core circuit", note: "One set of each, then round again. About a minute between rounds.", items: core });
+      items.push(...core);
+    }
+  }
 
   return {
     items,
