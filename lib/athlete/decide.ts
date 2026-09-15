@@ -1217,7 +1217,7 @@ function focusAddition(focus: string[], planned: string, lift: string | null) {
 export function exerciseTier(name: string, muscle?: string | null): number {
   const n = name.toLowerCase();
   const m = (muscle ?? "").toLowerCase();
-  if (/calf|calves|\btib|shin|\babs?\b|abdominal|crunch|plank|torso|\bcore\b|oblique|dead bug|bird dog|hollow|sit ?ups?|leg raise|hanging knee/.test(n)
+  if (/calf|calves|\btib|shin|\babs?\b|abdominal|crunch|plank|torso|\bcore\b|oblique|dead bug|bird dog|hollow|sit ?ups?|leg raise|hanging knee|toe touch|v to ext|v-?ups?|ab workout/.test(n)
       || /calves|abdominal|oblique/.test(m)) return 3;
   if (/tricep|bicep|curl|extension|lateral raise|front raise|rear delt|reverse fly|\bfly|flye|pec deck|face pull|kickback|pushdown|pullover|shrug|rotation|inner thigh|outer thigh|adduct|abduct/.test(n)) return 2;
   if (/bulgarian|split squat|lunge|step ?up|\brdl|romanian|good morning|single.?leg|pistol|nordic|hip thrust|glute bridge|\brow|lat pull|pull ?down|pull ?up|chin ?up|\bdip/.test(n)) return 1;
@@ -1237,34 +1237,48 @@ const CORE_DEFAULTS: [RegExp, string][] = [
   [/pallof|anti.?rotation/, "Pallof press — 3 x 10 each side"],
 ];
 
+/** One movement of a core routine, as the athlete does it. */
+function coreLine(e: LoggedSet & { total: number }): string {
+  const name = e.exercise.trim();
+  const times = e.total > 1 ? `${e.total} x ` : "";
+  if (e.pin && !/from (top|bottom)/i.test(e.pin)) return `${name} — ${times}${e.pin}`;
+  if (/plank|hold/i.test(name) && e.reps == null) return `${name} — 45 sec`;
+  if (e.weight == null) return `${name} — ${times}${e.reps ?? "–"} reps`;
+  return `${name} — ${Math.max(e.total, 3)} x ${e.reps ?? "–"} @ ${e.weight}`;
+}
+
 /**
- * The athlete's own core work, at their last loads: every core exercise in
- * the log, most recent first, leaning on the last four months so a movement
- * from two years ago does not outrank last week's. Filled to three or four
- * movements with the defaults, so "core" is never just a word.
+ * The athlete's own core routine: the most recent day their log shows a real
+ * core session (three or more movements), as they did it, or failing that
+ * their most recent core work. Filled to three movements with the defaults
+ * only when the log has fewer, so "core" is never just a word.
  */
 export function coreCircuit(sets: LoggedSet[], today: string,
                             muscleOf?: (name: string) => string | null | undefined): string[] {
+  void today;
   const isCore = (name: string, muscle?: string | null) =>
-    exerciseTier(name, muscle) === 3 && !/calf|calves|tib|shin/.test(name.toLowerCase());
-  const last: Record<string, LoggedSet & { total: number }> = {};
+    exerciseTier(name, muscle) === 3 && !/calf|calves|\btib|shin/.test(name.toLowerCase());
+  const byDay: Record<string, LoggedSet[]> = {};
   for (const r of sets) {
     const k = r.exercise.trim();
-    if (!isCore(k, muscleOf?.(k))) continue;
-    if (!last[k] || r.day > last[k].day) last[k] = { ...r, total: r.sets };
-    else if (r.day === last[k].day) last[k].total += r.sets;
+    // The routine's header line records that it was done, not a movement.
+    if (/^ab workout$/i.test(k) || !isCore(k, muscleOf?.(k))) continue;
+    (byDay[r.day] ??= []).push(r);
   }
-  const recent = shift(today, -120);
-  const own = Object.values(last)
-    .sort((a, b) => (a.day >= recent) === (b.day >= recent) ? b.day.localeCompare(a.day) : a.day >= recent ? -1 : 1)
-    .slice(0, 4)
-    // A hold was logged as a count of holds, not reps; it is prescribed as time.
-    .map((e) => /plank|hold/i.test(e.exercise)
-      ? `${e.exercise.trim()} — 3 x 45 s`
-      : `${e.exercise.trim()} — ${Math.max(e.total, 3)} x ${e.reps ?? "–"} @ ${e.weight ? e.weight : e.pin ?? "bodyweight"}`);
+  const days = Object.keys(byDay).sort().reverse();
+  const pick = days.find((d) => new Set(byDay[d].map((r) => r.exercise.trim())).size >= 3) ?? days[0];
+  const own: string[] = [];
+  if (pick) {
+    const seen: Record<string, LoggedSet & { total: number }> = {};
+    for (const r of byDay[pick]) {
+      const k = r.exercise.trim();
+      if (!seen[k]) seen[k] = { ...r, total: r.sets }; else seen[k].total += r.sets;
+    }
+    own.push(...Object.values(seen).map(coreLine));
+  }
   const items = [...own];
   for (const [re, line] of CORE_DEFAULTS) {
-    if (items.length >= 4) break;
+    if (items.length >= 3) break;
     if (!own.some((o) => re.test(o.toLowerCase()))) items.push(line);
   }
   return items;
@@ -1371,9 +1385,14 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
     const core = coreCircuit(sets, opts.today ?? new Date().toISOString().slice(0, 10), opts.muscleOf);
     if (core.length) {
       const own = core.filter((c) => !CORE_DEFAULTS.some(([, line]) => line === c)).length;
-      add = ["Core circuit", `${core.length} movements, 3 rounds, about 10 min`,
-             add[2] + (own ? " Your own exercises, at your last loads." : "")];
-      blocks.push({ title: "Core circuit", note: "One set of each, then round again. About a minute between rounds.", items: core });
+      // A bodyweight routine is done straight through, once; machine work
+      // goes round three times.
+      const routine = core.every((c) => !/@ \d/.test(c));
+      add = ["Core circuit",
+             routine ? `${core.length} movements, about 10 min` : `${core.length} movements, 3 rounds, about 10 min`,
+             add[2] + (own ? " Your own routine, as you last did it." : "")];
+      blocks.push({ title: "Core circuit", items: core,
+                    note: routine ? "Straight through, once. About 10 minutes." : "One set of each, then round again. About a minute between rounds." });
       items.push(...core);
     }
   }

@@ -13,6 +13,11 @@
  *   Seated rows: 7th from top  machine pin position, no numeric weight
  *   Calf raises: 50 x 40 (25)  parenthetical is a note, not a set
  *   Pushups: 25 x 3            bodyweight: reps x sets
+ *   Wide pushups: 25           bodyweight: reps, one set
+ *   Ab workout: (10 min):      a core routine; the lines under it are its movements
+ *   dead bugs: 32              inside it, a bare number is reps
+ *   1 min plank                a timed hold
+ *   Shoulder holds: 2, 1 min   two timed holds
  *   ... 130 x 12 ^             a progression marker
  *
  * A line with no set count written means DEFAULT_SETS.
@@ -40,11 +45,18 @@ const YEAR_RE = /^Workouts\s+(\d{2})\s*$/i;
 const MULT_RE = /^[Xx](\d+):?\s*$/;
 const PIN_RE = /(\d+)(?:st|nd|rd|th)\s+from\s+(top|bottom)/i;
 const SET_RE = /(\d+(?:\.\d+)?)\s*(?:lbs?|kg)?\s*[xX]\s*([\d,\s]+)/g;
+const AB_HEADER_RE = /^ab workout\b/i;
+// "1 min plank", "30 sec hollow hold": a timed hold with no colon.
+const HOLD_LINE_RE = /^(\d+(?:\.\d+)?)\s*(min|mins|minute|minutes|sec|secs|seconds?)\s+(.+)$/i;
+// "Forward shoulder holds: 2, 1 min" -> two holds of a minute; "Plank: 1 min".
+const HOLD_BODY_RE = /^(?:(\d+)\s*,\s*)?(\d+(?:\.\d+)?)\s*(min|mins|minute|minutes|sec|secs|seconds?)\b/i;
+// "dead bugs: 32", "sit ups: 50 reps": reps with no weight and no set count.
+const REPS_RE = /^(\d{1,3})\s*(?:reps?)?\s*$/i;
 
 const BODYWEIGHT = ["pushup", "sit up", "plank", "dead bug", "toe touch",
   "knee tuck", "tuck jump", "copenhagen", "mountain climber"];
 
-const SKIP = ["ab workout", "resistance band", "bands", "superset", "explosive",
+const SKIP = ["resistance band", "bands", "superset", "explosive",
   "neck exercises", "to add", "mid-back", "agility ladder", "ladder to sprint",
   "(ankle workout)", "scissors", "jumping jack", "icky shuffle", "hops and run",
   "hopscotch", "in-in-out-out", "in x 2"];
@@ -69,10 +81,12 @@ export function parseLog(text: string, fallbackYear?: number,
   let day: string | null = defaultDay ?? null;
   let sawDate = false;
   let mult = 1;
+  // Inside an "Ab workout" block a bare number is reps of a bodyweight move.
+  let inAb = false;
 
   for (const raw of text.split(/\r?\n/)) {
     const s = raw.trim();
-    if (!s) { mult = 1; continue; }
+    if (!s) { mult = 1; inAb = false; continue; }
 
     const ym = YEAR_RE.exec(s);
     if (ym) { year = 2000 + parseInt(ym[1]); years.add(year); continue; }
@@ -88,7 +102,7 @@ export function parseLog(text: string, fallbackYear?: number,
       const d = new Date(Date.UTC(yr, mo - 1, dy));
       day = d.getUTCMonth() === mo - 1 ? d.toISOString().slice(0, 10) : null;
       if (day) { years.add(yr); sawDate = true; }
-      mult = 1;
+      mult = 1; inAb = false;
       continue;
     }
 
@@ -108,7 +122,26 @@ export function parseLog(text: string, fallbackYear?: number,
     const mm = MULT_RE.exec(s);
     if (mm) { mult = parseInt(mm[1]); continue; }
 
-    if (!day || !s.includes(":")) continue;
+    if (!day) continue;
+
+    // The core routine: a header, then its movements. Older entries are the
+    // header alone, which still records that the routine was done.
+    if (AB_HEADER_RE.test(s)) {
+      const dur = /\((\d+)\s*min/i.exec(s);
+      out.push({ day, exercise: "Ab workout", weight: null, reps: null, sets: 1,
+                 pin: dur ? `${dur[1]} min` : null, notes: null });
+      inAb = true;
+      continue;
+    }
+    const hl = HOLD_LINE_RE.exec(s);
+    if (hl && !s.includes(":")) {
+      const nm = hl[3].trim();
+      out.push({ day, exercise: nm[0].toUpperCase() + nm.slice(1), weight: null, reps: null,
+                 sets: 1, pin: `${hl[1]} ${/^s/i.test(hl[2]) ? "sec" : "min"}`, notes: null });
+      continue;
+    }
+
+    if (!s.includes(":")) continue;
     const low = s.toLowerCase();
     if (SKIP.some((k) => low.includes(k))) continue;
 
@@ -121,7 +154,8 @@ export function parseLog(text: string, fallbackYear?: number,
     const body = rest.replace(/\([^)]*\)/g, "").replace(/\^/g, "").trim();
 
     const pm = PIN_RE.exec(body);
-    const pin = pm ? `${pm[1]} from ${pm[2]}` : null;
+    let pin = pm ? `${pm[1]} from ${pm[2]}` : null;
+    let countedOnce = false;
 
     const bw = BODYWEIGHT.some((b) => name.toLowerCase().includes(b));
     const entries: { weight: number | null; reps: number | null; sets: number }[] = [];
@@ -139,14 +173,28 @@ export function parseLog(text: string, fallbackYear?: number,
     }
 
     if (!entries.length && pin === null) {
-      // Time-based holds and prose land here. Kept out of the set maths, but
+      const hb = HOLD_BODY_RE.exec(body);
+      const rp = REPS_RE.exec(body);
+      if (hb) {
+        // A timed hold: "Plank: 1 min", "Shoulder holds: 2, 1 min".
+        pin = `${hb[2]} ${/^s/i.test(hb[3]) ? "sec" : "min"}`;
+        entries.push({ weight: null, reps: null, sets: hb[1] ? parseInt(hb[1]) : 1 });
+        countedOnce = true;
+      } else if (rp && (bw || inAb || /reps?$/i.test(body))) {
+        // Bodyweight reps with no set count: one set of that many.
+        entries.push({ weight: null, reps: parseInt(rp[1]), sets: 1 });
+        countedOnce = true;
+      }
+    }
+    if (!entries.length && pin === null) {
+      // Prose with a number in it lands here. Kept out of the set maths, but
       // surfaced so nothing disappears silently.
       if (/\d/.test(body)) unparsed.push(s);
       continue;
     }
     if (!entries.length) entries.push({ weight: null, reps: null, sets: 1 });
 
-    const explicit = entries.length > 1 || mult > 1 || bw;
+    const explicit = entries.length > 1 || mult > 1 || bw || countedOnce;
     for (const e of entries) {
       out.push({
         day, exercise: name, weight: e.weight, reps: e.reps,
