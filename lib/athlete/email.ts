@@ -27,8 +27,6 @@ export function renderEmail(opts: {
   session: Session; dashboardUrl: string;
   phase?: { phase: string; job: string; recovery_week: boolean };
   calendarUrl?: string;
-  /** What the athlete's own mornings have taught the engine each kind of day costs. */
-  learned?: { label: string; value: number; n: number }[];
 }) {
   const { date, dow, recovery, decision: dec, session: ses, dashboardUrl } = opts;
   const c = STATE[dec.level];
@@ -67,18 +65,6 @@ export function renderEmail(opts: {
        </div>`
     : "";
 
-  const learned = opts.learned?.length
-    ? `<div style="border-top:1px solid ${LINE};margin-top:20px;padding-top:14px">
-         <div style="font:500 9px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:${DIM}">What your mornings have taught it</div>
-         <div style="font:400 12px ${SANS};color:${MUTED};padding-top:5px;line-height:1.6">
-           ${opts.learned.map((l) =>
-             `${l.label} <span style="font-family:${MONO};color:${FG}">${l.value > 0 ? "+" : ""}${l.value.toFixed(1)}</span>` +
-             `<span style="color:${DIM}"> (${l.n} days)</span>`).join(" &middot; ")}
-         </div>
-         <div style="font:400 11px ${SANS};color:${DIM};padding-top:4px">Next-morning recovery points, against what your own mean reversion predicted. Re-measured every day.</div>
-       </div>`
-    : "";
-
   const deload = dec.deload_advised
     ? `<div style="border:1px solid #5a3a1a;background:#1d1409;padding:12px 14px;margin-top:16px">
          <div style="font:500 9px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:#f59e0b">Recovery week advised</div>
@@ -102,7 +88,6 @@ export function renderEmail(opts: {
   ${add}
   ${deload}
   ${phase}
-  ${learned}
   <div style="padding-top:22px">
     <a href="${dashboardUrl}" style="font:400 12px ${MONO};color:${DIM};text-decoration:none">Why &rarr;</a>
   </div>

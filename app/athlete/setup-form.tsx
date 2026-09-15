@@ -50,6 +50,7 @@ export type SetupDefaults = {
   focusMuscles: string[];
   notes: string;
   emailTo: string;
+  emailDaily: boolean;
 };
 
 const GOALS: [string, string][] = [
@@ -432,12 +433,23 @@ export function SetupForm({ defaults, accountEmail, sportsSeen, zone2Suggestion,
         )}
       </Question>
 
-      <Question n={8} title="Where should the morning email go?">
+      <Question n={8} title="How do you want each morning's decision?"
+        note="It is worked out every morning from your WHOOP recovery either way, and always shows on the dashboard.">
+        <div className="flex flex-col gap-2">
+          <label className="flex items-center gap-2 text-sm text-zinc-200">
+            <input type="radio" name="email_mode" value="email" defaultChecked={defaults.emailDaily} className="accent-lime-400" />
+            Email it to me each morning
+          </label>
+          <label className="flex items-center gap-2 text-sm text-zinc-200">
+            <input type="radio" name="email_mode" value="app" defaultChecked={!defaults.emailDaily} className="accent-lime-400" />
+            No email, I will read it in the app
+          </label>
+        </div>
         <input
           name="email_to" type="email" placeholder={accountEmail}
-          defaultValue={defaults.emailTo} className={`${field} w-full`}
+          defaultValue={defaults.emailTo} className={`${field} mt-4 w-full`}
         />
-        <p className={`${hint} mt-1.5`}>Leave blank to use the address you signed in with.</p>
+        <p className={`${hint} mt-1.5`}>Where the email goes. Leave blank to use the address you signed in with.</p>
       </Question>
 
       <div className="flex flex-wrap items-center gap-3">

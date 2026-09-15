@@ -16,6 +16,7 @@ import { Menu } from "lucide-react";
 const NAV_LINKS = [
   { href: "/protected", label: "Dashboard" },
   { href: "/athlete", label: "Setup" },
+  { href: "/coach", label: "Coach" },
   { href: "/calendar", label: "Plan" },
   { href: "/log-workout", label: "Log" },
 ] as const;

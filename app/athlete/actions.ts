@@ -103,6 +103,7 @@ export async function saveAthleteProfile(
   const notes = String(form.get("notes") ?? "").trim().slice(0, MAX_NOTES);
 
   const emailTo = String(form.get("email_to") ?? "").trim();
+  const emailDaily = form.get("email_mode") !== "app";
   if (emailTo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTo))
     return fail("That email address does not look right.");
 
@@ -140,6 +141,7 @@ export async function saveAthleteProfile(
     notes: notes || null,
     notes_read: notesRead,
     email_to: emailTo || null,
+    email_daily: emailDaily,
   };
   // What was read from the notes is what the engine holds and reminds; when the
   // notes have been read, they are the source, otherwise earlier values stand.

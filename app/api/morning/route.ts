@@ -22,7 +22,7 @@ import {
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
   runConsistencyWeeks, readiness, mesocycle, personalFrom, planInputs,
   whoopSportDays, mergeSportDays, summarizeSportDays, activityCosts,
-  dayKinds, measureKindDays, learnedCosts, kindLabel, MIN_MEASURED,
+  dayKinds, measureKindDays, learnedCosts,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
@@ -121,12 +121,12 @@ function offsetMinutes(offset: unknown): number | null {
 const dayAt = (offsetMin: number) =>
   new Date(Date.now() + offsetMin * 60_000).toISOString().slice(0, 10);
 
-async function alreadyEmailed(db: SupabaseClient, userId: string, day: string) {
-  const { data, error } = await retrying(() => db.from("decision_log").select("emailed_at")
+async function alreadyDecided(db: SupabaseClient, userId: string, day: string) {
+  const { data, error } = await retrying(() => db.from("decision_log").select("day")
     .eq("user_id", userId).eq("day", day).maybeSingle());
-  // Reading a failure as "not emailed yet" would send the same email twice.
-  if (error) throw new Error(`could not check today's email: ${error.message}`);
-  return Boolean(data?.emailed_at);
+  // Reading a failure as "not decided yet" would send the same email twice.
+  if (error) throw new Error(`could not check today's decision: ${error.message}`);
+  return Boolean(data);
 }
 
 async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) {
@@ -139,10 +139,10 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
   if (!cfg)
     return { user_id: userId, sent: false, skipped: "no training profile yet" };
 
-  // Cheap check first: an athlete already emailed today costs no WHOOP call.
+  // Cheap check first: an athlete already decided today costs no WHOOP call.
   const lastKnownToday = dayAt(cfg.utc_offset_minutes ?? 0);
-  if (!opts.force && !opts.dry && await alreadyEmailed(db, userId, lastKnownToday))
-    return { user_id: userId, sent: false, reason: "already emailed", day: lastKnownToday };
+  if (!opts.force && !opts.dry && await alreadyDecided(db, userId, lastKnownToday))
+    return { user_id: userId, sent: false, reason: "already decided", day: lastKnownToday };
 
   // Two sources, because there are two ways to log: pasted text in
   // athlete_sets, and the app's own calendar logger writing workout_logs.
@@ -248,8 +248,8 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
     return { user_id: userId, sent: false, waiting: true, latest: state.date, expecting: todayLocal };
 
   if (!opts.force && !opts.dry && todayLocal !== lastKnownToday
-      && await alreadyEmailed(db, userId, todayLocal))
-    return { user_id: userId, sent: false, reason: "already emailed", day: todayLocal };
+      && await alreadyDecided(db, userId, todayLocal))
+    return { user_id: userId, sent: false, reason: "already decided", day: todayLocal };
 
   // Longest run in the last three weeks: the anchor for the whole ladder.
   // Three weeks rather than sixty days so a good run two months ago stops
@@ -304,15 +304,17 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
     session_costs: sessionCosts,
   };
 
-  // The kinds of day the athlete actually has, once each has enough mornings
-  // behind it to mean something. Plain days first, pairs after.
-  const learnedLines = Object.entries(sessionCosts)
-    .filter(([, c]) => c.n >= MIN_MEASURED)
-    .sort((a, b) => a[0].includes("+") === b[0].includes("+") ? b[1].n - a[1].n : a[0].includes("+") ? 1 : -1)
-    .slice(0, 8)
-    .map(([kind, c]) => ({ label: kindLabel(kind), value: c.value, n: c.n }));
-
   if (opts.dry) return { user_id: userId, sent: false, dry: true, ...payload };
+
+  // An athlete who reads the decision in the app gets it stored and no email.
+  // The stored row is what the dashboard shows, and the once-a-day guard.
+  if (cfg.email_daily === false) {
+    const { error: logErr } = await retrying(() => db.from("decision_log").upsert(
+      { user_id: userId, day: state.date, decision: payload, emailed_at: null },
+      { onConflict: "user_id,day" }));
+    if (logErr) throw new Error(`could not store today's decision: ${logErr.message}`);
+    return { user_id: userId, sent: false, decided: true, day: state.date, call: decision.call };
+  }
 
   const to = cfg.email_to
     || (await retrying(() => db.auth.admin.getUserById(userId))).data.user?.email;
@@ -323,7 +325,6 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
     decision, session,
     dashboardUrl: cfg.dashboard_url ?? `${opts.origin}/calendar`,
     phase: { phase: meso.phase, job: meso.job, recovery_week: meso.recovery_week },
-    learned: learnedLines,
   });
   const { id } = await sendEmail(
     to, `${decision.call}  (${Math.round(state.recovery)}% recovered)`, html);

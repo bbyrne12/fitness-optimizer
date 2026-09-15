@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 
 import { RoutineAnalysisCard } from "./analysis-card";
+import { LearnedCard } from "./learned-card";
+import { TodayCard } from "./today-card";
 
 function startOfWeekUtcIso(date: Date) {
   const day = (date.getUTCDay() + 6) % 7; // Monday=0 ... Sunday=6
@@ -210,7 +212,7 @@ async function DashboardContent({ searchParams }: { searchParams: Search }) {
         <div className={`rounded-md border p-4 text-sm ${
           notes ? "border-amber-400/40 bg-amber-400/5 text-zinc-200" : "border-lime-400/40 bg-lime-400/5 text-zinc-200"
         }`}>
-          Plan saved. Tomorrow&apos;s email uses these answers.{notes ? ` ${notes}` : ""}{" "}
+          Plan saved. Tomorrow&apos;s decision uses these answers.{notes ? ` ${notes}` : ""}{" "}
           <Link href="/calendar" className="text-lime-400 hover:underline">See the training plan</Link>
         </div>
       )}
@@ -220,6 +222,9 @@ async function DashboardContent({ searchParams }: { searchParams: Search }) {
           Welcome back, {displayName}
         </h1>
       </header>
+
+      <TodayCard />
+      <LearnedCard />
 
       <section className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <Card>

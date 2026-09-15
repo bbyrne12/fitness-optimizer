@@ -113,6 +113,7 @@ async function AthleteBody({ searchParams }: { searchParams: Search }) {
     focusMuscles: Array.isArray(cfg.focus_muscles) ? cfg.focus_muscles.map(String) : [],
     notes: typeof cfg.notes === "string" ? cfg.notes : "",
     emailTo: cfg.email_to ?? "",
+    emailDaily: cfg.email_daily !== false,
   };
   const ready = status.connected && answered;
 
