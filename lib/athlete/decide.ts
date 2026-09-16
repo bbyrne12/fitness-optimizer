@@ -249,6 +249,80 @@ function localDay(ts: string, offset?: string | null): string {
   return iso(new Date(Date.parse(ts) + mins * 60_000));
 }
 
+/** Minutes past local midnight. */
+function localMinutes(ts: string, offset?: string | null): number {
+  const local = new Date(Date.parse(ts) + offsetMin(offset) * 60_000);
+  return local.getUTCHours() * 60 + local.getUTCMinutes();
+}
+
+function offsetMin(offset?: string | null): number {
+  let off = offset ?? "+00:00";
+  if (off.length < 6 || !"+-".includes(off[0])) off = "+00:00";
+  const sign = off[0] === "+" ? 1 : -1;
+  return sign * (parseInt(off.slice(1, 3)) * 60 + parseInt(off.slice(4, 6)));
+}
+
+/** Hours actually asleep in one WHOOP sleep. */
+function asleepHours(s: Rec): number {
+  const st = s.score?.stage_summary ?? {};
+  return ((st.total_in_bed_time_milli ?? 0) - (st.total_awake_time_milli ?? 0)) / 3.6e6;
+}
+
+/** Everything slept in the night that ended on `day`: every scored sleep,
+ *  nap segments included, that ended that morning. A night broken by being
+ *  awake for a while is two WHOOP sleeps, and both count. */
+function nightHours(w: Rec, day: string): number {
+  let h = 0;
+  for (const s of w.sleep ?? [])
+    if (s.score && localDay(s.end, s.timezone_offset) === day && localMinutes(s.end, s.timezone_offset) < 13 * 60)
+      h += asleepHours(s);
+  return Math.round(h * 10) / 10;
+}
+
+const median = (xs: number[]) => {
+  const v = [...xs].sort((a, b) => a - b);
+  return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : 0;
+};
+
+/**
+ * Whether this morning's recovery is probably premature: the night was well
+ * short of the athlete's usual, it ended well before their usual wake time,
+ * and that usual time has not yet passed. That is what waking for a while and
+ * going back to sleep looks like, and WHOOP scores recovery at the first
+ * wake. Waiting until just past the usual wake time lets the rest of the
+ * night count; after that the decision goes out whatever WHOOP has.
+ */
+export function prematureMorning(w: Rec, nowMs = Date.now()) {
+  const mains = (w.sleep ?? []).filter((s: Rec) => s.score && !s.nap)
+    .sort((a: Rec, b: Rec) => String(b.end).localeCompare(String(a.end)));
+  const last = mains[0];
+  if (!last) return null;
+  const off = last.timezone_offset;
+  const today = localDay(last.end, off);
+  const history = mains.filter((s: Rec) => localDay(s.end, s.timezone_offset) < today).slice(0, 30);
+  if (history.length < 10) return null;
+  const usualWake = median(history.map((s: Rec) => localMinutes(s.end, s.timezone_offset)));
+  const usualHours = median([...new Set<string>(history.map((s: Rec) => localDay(s.end, s.timezone_offset)))]
+    .map((d) => nightHours(w, d)).filter((h) => h > 0));
+  const slept = nightHours(w, today);
+  const woke = localMinutes(last.end, off);
+  const now = localMinutes(new Date(nowMs).toISOString(), off);
+  const nowDay = localDay(new Date(nowMs).toISOString(), off);
+  const clock = (m: number) => `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, "0")}`;
+  const wait = nowDay === today && slept < 0.8 * usualHours
+    && woke < usualWake - 60 && now < usualWake + 30;
+  return {
+    wait,
+    slept_h: slept,
+    usual_h: Math.round(usualHours * 10) / 10,
+    woke: clock(woke),
+    usual_wake: clock(usualWake),
+    reason: wait
+      ? `short night (${slept}h vs your usual ${Math.round(usualHours * 10) / 10}h) that ended at ${clock(woke)}; waiting until after your usual ${clock(usualWake)} wake in case you went back to sleep`
+      : null,
+  };
+}
+
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
 const sd = (xs: number[]) => {
   const m = mean(xs);
@@ -612,9 +686,16 @@ export function buildState(w: Rec) {
   const rec: Record<string, Rec> = {};
   for (const r of w.recovery) if (r.score) rec[localDay(r.created_at)] = r.score;
 
+  // Each night belongs to the morning it ended on; the longest main sleep
+  // carries its debt and performance.
   const sleep: Record<string, Rec> = {};
-  for (const s of w.sleep)
-    if (s.score && !s.nap) sleep[localDay(s.start, s.timezone_offset)] = s.score;
+  const longest: Record<string, number> = {};
+  for (const s of w.sleep) {
+    if (!s.score || s.nap) continue;
+    const d = localDay(s.end, s.timezone_offset);
+    const h = asleepHours(s);
+    if (!(d in sleep) || h > longest[d]) { sleep[d] = s.score; longest[d] = h; }
+  }
 
   const strain: Record<string, number> = {};
   for (const c of w.cycles)
@@ -658,11 +739,9 @@ export function buildState(w: Rec) {
   };
 
   const sl = sleep[today] ?? {};
-  const stage = sl.stage_summary ?? {};
   const need = sl.sleep_needed ?? {};
-  const sleptH =
-    ((stage.total_in_bed_time_milli ?? 0) - (stage.total_awake_time_milli ?? 0)) /
-    3.6e6;
+  // Every segment of the night, so waking for a while does not halve it.
+  const sleptH = nightHours(w, today);
 
   return {
     date: today,

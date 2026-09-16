@@ -21,7 +21,7 @@ import {
   buildState, racePlan, weekTemplate, decide, prescribe,
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
   runConsistencyWeeks, readiness, mesocycle, personalFrom, planInputs,
-  whoopSportDays, mergeSportDays, summarizeSportDays, activityCosts,
+  whoopSportDays, mergeSportDays, summarizeSportDays, activityCosts, prematureMorning,
   dayKinds, learnRows, fitCosts,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
@@ -247,6 +247,13 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
   const todayLocal = dayAt(offset);
   if (state.date !== todayLocal)
     return { user_id: userId, sent: false, waiting: true, latest: state.date, expecting: todayLocal };
+
+  // A short night that ended early is often a wake-up before going back to
+  // sleep; WHOOP scores recovery at the first wake. Hold until the athlete's
+  // usual wake time has passed.
+  const morning = prematureMorning(w);
+  if (morning?.wait && !opts.force)
+    return { user_id: userId, sent: false, waiting: true, reason: morning.reason };
 
   if (!opts.force && !opts.dry && todayLocal !== lastKnownToday
       && await alreadyDecided(db, userId, todayLocal))
