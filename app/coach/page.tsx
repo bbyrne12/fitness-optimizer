@@ -40,9 +40,12 @@ export default function CoachPage() {
           <header className="space-y-2">
             <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-lime-400">Coach</p>
             <h1 className="text-3xl font-semibold tracking-tight text-white">Adjust your plan</h1>
-            <p className="text-sm text-zinc-400">
-              Say it the way you would to a coach. Anything you agree to is saved to your plan.
-              The setup page still shows every setting if you would rather edit directly.
+            <p className="max-w-xl text-sm leading-relaxed text-zinc-500">
+              It knows your plan, your week and your last three weeks of training.{" "}
+              <Link href="/athlete" className="text-zinc-400 underline-offset-4 hover:text-lime-300 hover:underline">
+                Setup
+              </Link>{" "}
+              still edits every setting by hand.
             </p>
           </header>
           <Suspense fallback={<div className="h-80 animate-pulse rounded-xl border border-zinc-800 bg-zinc-900" />}>

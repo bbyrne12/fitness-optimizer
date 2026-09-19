@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { ArrowUp, Check } from "lucide-react";
 
 import { coach, type ChatMessage } from "./actions";
 
 type Shown = ChatMessage & { applied?: string[]; error?: string };
 
 const STARTERS = [
+  "Why is Wednesday a pull day?",
+  "I tweaked my knee, keep squats where they are",
   "Move my long run to Sunday",
-  "I tweaked my shoulder, keep bench where it is",
-  "Why is Thursday a pull day?",
   "Add basketball on Monday evenings",
 ];
 
@@ -18,8 +19,21 @@ export function CoachChat({ firstName }: { firstName: string }) {
   const [draft, setDraft] = useState("");
   const [pending, start] = useTransition();
   const endRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, pending]);
+  useEffect(() => {
+    if (messages.length || pending) endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, pending]);
+
+  // The composer grows with the message instead of scrolling inside itself.
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+    // Only scrolls once it has grown as far as it may.
+    el.style.overflowY = el.scrollHeight > 180 ? "auto" : "hidden";
+  }, [draft]);
 
   function send(text: string) {
     const t = text.trim();
@@ -39,64 +53,107 @@ export function CoachChat({ firstName }: { firstName: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="min-h-[320px] space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-        {messages.length === 0 && (
-          <div className="space-y-3">
-            <p className="text-sm leading-relaxed text-zinc-400">
-              Tell the coach what should change, {firstName}, or ask why the plan does something.
-              Changes are saved to your plan straight away and show up in tomorrow&apos;s decision.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {STARTERS.map((s) => (
-                <button key={s} type="button" onClick={() => send(s)}
-                  className="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-300 transition hover:border-lime-400/60 hover:text-lime-300">
-                  {s}
-                </button>
+    <div className="flex flex-col gap-8">
+      {messages.length === 0 ? (
+        <div className="space-y-4">
+          <p className="text-[15px] leading-relaxed text-zinc-400">
+            Tell the coach what should change, {firstName}, or ask why the plan does
+            something. Anything you agree to is saved straight away.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {STARTERS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => send(s)}
+                className="rounded-full border border-zinc-800 bg-zinc-900/60 px-3.5 py-2 text-[13px] text-zinc-300 transition-colors hover:border-lime-400/50 hover:text-lime-300"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-6">
+          {messages.map((m, i) =>
+            m.role === "user" ? (
+              <div key={i} className="flex justify-end">
+                <p className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-lime-400 px-4 py-2.5 text-[15px] leading-relaxed text-zinc-950">
+                  {m.content}
+                </p>
+              </div>
+            ) : (
+              <div key={i} className="flex flex-col gap-3">
+                {m.error ? (
+                  // Not the coach talking: something went wrong, said quietly.
+                  <p className="rounded-xl border border-red-500/25 bg-red-500/5 px-3.5 py-2.5 text-[13px] leading-relaxed text-red-300">
+                    {m.content}
+                  </p>
+                ) : (
+                  <p className="max-w-[92%] whitespace-pre-wrap text-[15px] leading-[1.65] text-zinc-100">
+                    {m.content}
+                  </p>
+                )}
+                {m.applied && (
+                  <ul className="flex flex-wrap gap-2">
+                    {m.applied.map((a) => (
+                      <li
+                        key={a}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-lime-400/25 bg-lime-400/10 px-3 py-1 text-[12px] text-lime-300"
+                      >
+                        <Check className="h-3 w-3 shrink-0" strokeWidth={3} />
+                        {a}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ),
+          )}
+          {pending && (
+            <div className="flex gap-1.5 pt-1" aria-label="Thinking">
+              {[0, 150, 300].map((d) => (
+                <span
+                  key={d}
+                  className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-600"
+                  style={{ animationDelay: `${d}ms` }}
+                />
               ))}
             </div>
-          </div>
-        )}
-        {messages.map((m, i) => (
-          <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
-            <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
-              m.role === "user" ? "bg-lime-400 text-zinc-950"
-              : m.error ? "border border-red-500/40 bg-red-500/5 text-red-200"
-              : "border border-zinc-800 bg-zinc-950 text-zinc-100"}`}>
-              <p className="whitespace-pre-wrap">{m.content}</p>
-              {m.applied && (
-                <ul className="mt-2 space-y-0.5 border-t border-zinc-800 pt-2">
-                  {m.applied.map((a) => (
-                    <li key={a} className="font-mono text-[11px] text-lime-400">✓ {a}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        ))}
-        {pending && (
-          <div className="flex justify-start">
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-500">Thinking…</div>
-          </div>
-        )}
-        <div ref={endRef} />
-      </div>
+          )}
+          <div ref={endRef} />
+        </div>
+      )}
 
       <form
         onSubmit={(e) => { e.preventDefault(); send(draft); }}
-        className="flex gap-2"
+        className="sticky bottom-4 z-10"
       >
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="What should change?"
-          disabled={pending}
-          className="flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-lime-400/50 focus:outline-none focus:ring-1 focus:ring-lime-400/40 disabled:opacity-50"
-        />
-        <button type="submit" disabled={pending || !draft.trim()}
-          className="rounded-md bg-lime-400 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-lime-300 disabled:opacity-50">
-          Send
-        </button>
+        <div className="relative rounded-3xl border border-zinc-800 bg-zinc-900/90 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.9)] backdrop-blur transition-colors focus-within:border-lime-400/40">
+          <textarea
+            ref={boxRef}
+            value={draft}
+            rows={1}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(draft); }
+            }}
+            placeholder="What should change?"
+            disabled={pending}
+            className="max-h-44 w-full resize-none overflow-hidden rounded-3xl bg-transparent py-3.5 pl-5 pr-14 text-[15px] leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:outline-none disabled:opacity-60"
+          />
+          <button
+            type="submit"
+            disabled={pending || !draft.trim()}
+            aria-label="Send"
+            className="absolute bottom-2.5 right-2.5 grid h-9 w-9 place-items-center rounded-full bg-lime-400 text-zinc-950 transition hover:bg-lime-300 disabled:bg-zinc-800 disabled:text-zinc-600"
+          >
+            <ArrowUp className="h-4.5 w-4.5" strokeWidth={2.5} />
+          </button>
+        </div>
+        <p className="mt-2 px-1 text-[11px] text-zinc-600">
+          Enter sends · Shift + Enter for a new line
+        </p>
       </form>
     </div>
   );
