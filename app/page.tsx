@@ -87,7 +87,7 @@ export default function Home() {
           <p className="mt-6 max-w-2xl text-base text-zinc-400 sm:text-lg md:text-xl">
             Fitness Optimizer reads your WHOOP recovery when you wake up and emails
             one prescription for the day: what to train, how hard, and at what loads.
-            No dashboard to interpret.
+            Nothing to interpret.
           </p>
 
           <div className="mt-10 flex w-full flex-col items-center justify-center gap-4 sm:flex-row">
