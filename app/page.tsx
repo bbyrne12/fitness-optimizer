@@ -1,45 +1,72 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, Dumbbell, Sparkles } from "lucide-react";
+import { ArrowRight, Activity, BarChart3, MessageSquare, NotebookPen } from "lucide-react";
 
 const FEATURES = [
   {
-    icon: Dumbbell,
-    title: "Routine Analysis",
+    icon: Activity,
+    title: "One call each morning",
     description:
-      "Identify muscle imbalances and volume gaps in your current training.",
-  },
-  {
-    icon: Sparkles,
-    title: "Smart Weekly Plans",
-    description:
-      "AI-generated workout plans tailored to your goals, experience, and available equipment.",
+      "Once WHOOP scores your recovery, an email says what to train today, how hard, and at what loads. Green trains, amber holds the weights where they were, red rests.",
   },
   {
     icon: BarChart3,
-    title: "Track Progress",
+    title: "It learns what things cost you",
     description:
-      "Log every workout and watch your strength and consistency trend upward.",
+      "Every kind of day is priced from your own history: the next morning's recovery against a rest day, with that night's sleep held equal. Runs are sorted by your own heart-rate zones, not by how long they were.",
+  },
+  {
+    icon: MessageSquare,
+    title: "A coach you can argue with",
+    description:
+      "Move your long run, add a sport, flag a sore shoulder, or ask why Thursday is a pull day. It knows your plan and your last three weeks, and changes the plan as you agree to it.",
+  },
+  {
+    icon: NotebookPen,
+    title: "Logging stays the way you write it",
+    description:
+      "Paste the workout straight out of your notes app. Loads carry into the next session of that kind and go up when you have earned them.",
   },
 ];
 
 const STEPS = [
   {
     number: "01",
-    title: "Tell us your goals",
+    title: "Connect WHOOP",
     description:
-      "Set your experience level, available equipment, and training schedule.",
+      "One tap, then WHOOP's own login. Your history is read once, so the plan knows what each sport costs you before the first email.",
   },
   {
     number: "02",
-    title: "Log your routine",
+    title: "Answer eight questions",
     description:
-      "Add the exercises you currently do so we can analyze your training.",
+      "What you are training for, how many days you lift and run, the sports already on your calendar, and anything sore.",
   },
   {
     number: "03",
-    title: "Get your plan",
+    title: "Train what the morning says",
     description:
-      "Receive a personalized weekly plan that addresses your weaknesses.",
+      "The week is built around your practices and your long run, then each morning is adjusted to the recovery you actually woke up with.",
+  },
+];
+
+const SHOTS = [
+  {
+    src: "/screenshots/morning-email.png",
+    alt: "The morning email: the day's call, the session in order, and one addition",
+    title: "The morning email",
+    caption: "The decision, the session in order, and why it looks like that.",
+  },
+  {
+    src: "/screenshots/training-plan.png",
+    alt: "The training plan: weeks laid out to a race date",
+    title: "The plan",
+    caption: "Your weeks to the race, built around the sports you already play.",
+  },
+  {
+    src: "/screenshots/workout-journal.png",
+    alt: "The workout journal: a calendar of logged sessions",
+    title: "The journal",
+    caption: "Every session you have logged, and where the next loads come from.",
   },
 ];
 
@@ -54,16 +81,17 @@ export default function Home() {
         <div className="relative z-10 mx-auto flex w-full max-w-4xl flex-col items-center text-center">
           <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/60 px-4 py-1.5 text-xs font-medium uppercase tracking-widest text-zinc-400">
             <span className="h-1.5 w-1.5 rounded-full bg-lime-400" />
-            Fitness Optimizer
+            Built on the WHOOP API
           </span>
           <h1 className="text-5xl font-bold leading-[1.05] tracking-tight text-white sm:text-6xl md:text-7xl lg:text-8xl">
-            Train Smarter.
+            One decision,
             <br />
-            <span className="text-lime-400">Recover Better.</span>
+            <span className="text-lime-400">every morning.</span>
           </h1>
           <p className="mt-6 max-w-2xl text-base text-zinc-400 sm:text-lg md:text-xl">
-            A personalized fitness optimizer that analyzes your routine, fixes
-            imbalances, and builds your weekly plan.
+            Fitness Optimizer reads your WHOOP recovery when you wake up and emails
+            one prescription for the day: what to train, how hard, and at what loads.
+            No dashboard to interpret.
           </p>
 
           <div className="mt-10 flex w-full flex-col items-center justify-center gap-4 sm:flex-row">
@@ -82,7 +110,9 @@ export default function Home() {
             </Link>
           </div>
 
-          <p className="mt-5 text-xs text-zinc-500">No credit card required</p>
+          <p className="mt-5 text-xs text-zinc-500">
+            Free. A WHOOP membership is what it reads from.
+          </p>
         </div>
       </section>
 
@@ -90,13 +120,14 @@ export default function Home() {
         <div className="mx-auto max-w-6xl">
           <div className="mb-12 max-w-2xl">
             <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl md:text-5xl">
-              Built for athletes who want results.
+              Your recovery, turned into a session.
             </h2>
             <p className="mt-4 text-base text-zinc-400 md:text-lg">
-              Every feature is designed to remove guesswork from your training.
+              WHOOP tells you how recovered you are. This tells you what to do about
+              it, in the sport and the lifts you already train.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             {FEATURES.map(({ icon: Icon, title, description }) => (
               <div
                 key={title}
@@ -119,10 +150,44 @@ export default function Home() {
         <div className="mx-auto max-w-6xl">
           <div className="mb-12 max-w-2xl">
             <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl md:text-5xl">
+              What it looks like
+            </h2>
+            <p className="mt-4 text-base text-zinc-400 md:text-lg">
+              Real mornings, from a real WHOOP account.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            {SHOTS.map(({ src, alt, title, caption }) => (
+              <figure key={src} className="flex flex-col">
+                <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt={alt}
+                    loading="lazy"
+                    className="h-[360px] w-full object-cover object-top"
+                  />
+                </div>
+                <figcaption className="mt-3">
+                  <span className="text-sm font-semibold text-white">{title}</span>
+                  <span className="mt-1 block text-sm leading-relaxed text-zinc-400">
+                    {caption}
+                  </span>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-zinc-900 px-6 py-16 md:py-24">
+        <div className="mx-auto max-w-6xl">
+          <div className="mb-12 max-w-2xl">
+            <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl md:text-5xl">
               How it works
             </h2>
             <p className="mt-4 text-base text-zinc-400 md:text-lg">
-              From signup to your first optimized week in minutes.
+              Connect once. The first email arrives the next morning WHOOP scores you.
             </p>
           </div>
           <div className="grid grid-cols-1 gap-8 md:grid-cols-3 md:gap-10">
@@ -138,16 +203,21 @@ export default function Home() {
               </div>
             ))}
           </div>
+          <p className="mt-10 max-w-3xl text-sm leading-relaxed text-zinc-500">
+            Recovery, sleep, cycles and workouts come from the WHOOP API over your own
+            OAuth grant, and are only ever read. Disconnecting on the setup page deletes
+            the stored tokens, and each athlete sees only their own data.
+          </p>
         </div>
       </section>
 
       <section className="px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl rounded-3xl border border-zinc-800 bg-zinc-900 px-6 py-16 text-center md:py-20">
           <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl md:text-5xl">
-            Ready to optimize your training?
+            Stop guessing at 6am.
           </h2>
           <p className="mx-auto mt-4 max-w-xl text-base text-zinc-400 md:text-lg">
-            Join now and get a personalized weekly plan today.
+            Connect WHOOP, answer eight questions, and read one line tomorrow morning.
           </p>
           <div className="mt-8 flex justify-center">
             <Link
@@ -162,9 +232,12 @@ export default function Home() {
       </section>
 
       <footer className="border-t border-zinc-900 px-6 py-8">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-xs text-zinc-500 sm:flex-row">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-center text-xs text-zinc-500 sm:flex-row sm:text-left">
           <span className="font-semibold tracking-tight text-zinc-400">
             Fitness Optimizer
+          </span>
+          <span>
+            Not affiliated with WHOOP. Training guidance, not medical advice.
           </span>
           <span>2026</span>
         </div>
