@@ -89,6 +89,11 @@ How the plan works, so you can explain it:
 - Loads come from the athlete's own log: the last session of that kind, with a bump once the same load has been done cleanly enough times, except lifts held at current weight.
 - Notes are read into structured fields (held lifts, per-session reminders) when they change.
 
+What you can see, in the athlete's context below:
+- recent_days: the last three weeks, one entry per day. "trained" is what WHOOP recorded that day (sports, runs by heart-rate bucket) plus the lift kind from their log; "lifts" is what they actually logged, at their loads; "recovery" and "call" are that morning's decision. Answer questions about what they did from this, rather than saying you cannot see it.
+- Freshness: WHOOP sessions are read each morning, so today's entry usually only covers what happened before this morning. A session later today appears tomorrow. Say that rather than saying it did not happen.
+- A day with nothing recorded is a rest day as far as the data goes, but a workout the watch missed is possible; if they say they did something, believe them.
+
 Rules:
 - Make a change only when the athlete asks for it or clearly agrees to one you proposed. Use the update_plan tool for every change, with only the fields that change. Never describe a change as made without calling the tool.
 - Keep the full lists when editing a list field: to add a sport, send the existing activities plus the new one.
@@ -137,9 +142,51 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
   if (usage.usd >= USER_DAILY_USD || (await spentToday()) >= ALL_DAILY_USD)
     return { reply: "", applied: [], error: LIMIT_MESSAGE };
 
-  const { data: latest } = await supabase
-    .from("decision_log").select("day,decision").eq("user_id", user.id)
-    .order("day", { ascending: false }).limit(1).maybeSingle();
+  // The athlete's own local day, so "yesterday" means theirs.
+  const shiftDay = (d: string, n: number) => new Date(Date.parse(d) + n * 864e5).toISOString().slice(0, 10);
+  const localToday = new Date(Date.now() + Number(cfg.utc_offset_minutes ?? 0) * 60_000)
+    .toISOString().slice(0, 10);
+  const RECENT_DAYS = 21;
+  const from = shiftDay(localToday, -RECENT_DAYS);
+
+  const [{ data: latest }, { data: recentDecisions }, { data: recentSets }] = await Promise.all([
+    supabase.from("decision_log").select("day,decision").eq("user_id", user.id)
+      .order("day", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("decision_log")
+      .select("day,decision->state->recovery,decision->state->sleep_hours,decision->decision->level,decision->decision->call")
+      .eq("user_id", user.id).gte("day", from).order("day", { ascending: false }),
+    supabase.from("athlete_sets").select("day,exercise,weight,reps,sets,pin")
+      .eq("user_id", user.id).gte("day", from).order("day", { ascending: false }).limit(400),
+  ]);
+
+  // What the athlete actually did, day by day: WHOOP's sessions from the
+  // learned history, their own logged lifts, and that morning's decision.
+  const recentDays = () => {
+    const kinds = (cfg.learned?.days ?? {}) as Record<string, { kind?: string }>;
+    const morning = new Map((recentDecisions ?? []).map((d: any) => [d.day, d]));
+    const lifts: Record<string, string[]> = {};
+    for (const r of recentSets ?? []) {
+      const load = r.weight ? ` @ ${r.weight}` : r.pin ? ` ${r.pin}` : "";
+      (lifts[r.day] ??= []).push(`${r.exercise} ${r.sets} x ${r.reps ?? "-"}${load}`);
+    }
+    const out = [];
+    for (let i = 0; i <= RECENT_DAYS; i++) {
+      const date = shiftDay(localToday, -i);
+      const kind = kinds[date]?.kind;
+      const m = morning.get(date) as any;
+      if (!kind && !lifts[date] && !m) continue;
+      out.push({
+        date,
+        day: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(date + "T12:00:00Z").getUTCDay()],
+        trained: kind ? kindLabel(kind) : "nothing recorded",
+        lifts: lifts[date],
+        recovery: m?.recovery != null ? Math.round(m.recovery) : undefined,
+        sleep_h: m?.sleep_hours,
+        call: m?.call,
+      });
+    }
+    return out;
+  };
 
   const context = () => {
     const inputs = planInputs(cfg);
@@ -147,7 +194,7 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
       .filter(([, c]) => c.n >= 1)
       .map(([k, c]) => ({ day: kindLabel(k), cost_vs_rest_day: c.value, measured_days: c.n }));
     const dec = (latest?.decision ?? {}) as Record<string, any>;
-    return "The athlete's current plan, week, learned costs and latest decision:\n" + JSON.stringify({
+    return "The athlete's plan, what they have actually trained lately, and this morning's decision:\n" + JSON.stringify({
       plan: {
         goals: inputs.goals, race: inputs.race,
         week: { lift_days: inputs.liftDays, run_days: inputs.runDays, long_run_day: inputs.longRunDay },
@@ -158,6 +205,8 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
       },
       week_template: weekTemplate(inputs),
       learned_costs: learned,
+      today: localToday,
+      recent_days: recentDays(),
       latest_decision: latest ? { day: latest.day, level: dec.decision?.level, call: dec.decision?.call,
         detail: dec.decision?.detail, reasons: dec.decision?.reasons, session: dec.session?.items } : null,
     }, null, 1);
