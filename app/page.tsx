@@ -8,7 +8,7 @@ const FEATURES = [
     icon: Activity,
     title: "One call each morning",
     description:
-      "Once WHOOP scores your recovery, an email says what to train today, how hard, and at what loads. Green trains, amber holds the weights where they were, red rests.",
+      "Once WHOOP scores your recovery, an email says what to train today, how hard, and at what loads. The lines between easy and hard are your own, learned from your own spread of mornings, and the session scales with the actual number: 71% and 45% are both a modified day, and they are not the same one.",
   },
   {
     icon: BarChart3,
@@ -202,11 +202,9 @@ export default function Home() {
                     className="h-[360px] w-full object-cover object-top"
                   />
                 </div>
-                <figcaption className="mt-3">
-                  <span className="text-sm font-semibold text-white">{title}</span>
-                  <span className="mt-1 block text-sm leading-relaxed text-zinc-400">
-                    {caption}
-                  </span>
+                <figcaption className="mt-3 text-sm leading-relaxed text-zinc-400">
+                  <span className="font-semibold text-white">{title}.</span>{" "}
+                  {caption}
                 </figcaption>
               </figure>
             ))}

@@ -22,7 +22,7 @@ import {
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
   runConsistencyWeeks, readiness, mesocycle, personalFrom, planInputs,
   whoopSportDays, mergeSportDays, summarizeSportDays, activityCosts, prematureMorning,
-  dayKinds, learnRows, fitCosts,
+  dayKinds, learnRows, fitCosts, recoveryBands,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
@@ -275,6 +275,10 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
   const personal = personalFrom(cfg);
   personal.activityCosts = activityCosts(inputs.activities, sports, tun);
   personal.sessionCosts = sessionCosts;
+  // Green and red are this athlete's own, off their whole history, unless the
+  // profile pins them by hand.
+  personal.bands = recoveryBands(hist, tun, learnedRows,
+    Boolean(cfg.tunables && ("recovery_green" in cfg.tunables || "recovery_red" in cfg.tunables)));
   // One set of numbers: an activity's cost is its learned one where that has
   // enough mornings behind it, unless the profile pins it.
   for (const a of inputs.activities) {
@@ -297,6 +301,7 @@ async function runForAthlete(db: SupabaseClient, userId: string, opts: RunOpts) 
                               intervalsReady: ready.intervals,
                               easyMinutes: plan.easy_run_minutes, personal,
                               defaultSets: tun.default_sets,
+                              scale: decision.scale,
                               muscleOf: (n) => alias(n)?.primary_muscle,
                               today: state.date });
   const dist = intensityDistribution(state._workouts as any, state.date);

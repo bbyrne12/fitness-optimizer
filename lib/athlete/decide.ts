@@ -176,6 +176,9 @@ export type Personal = {
    *  own mornings; filled in with fitCosts(). Keys are session kinds:
    *  "lift:legs", "run:zone2", "sport:lacrosse", "lift:pull+run:zone2". */
   sessionCosts: Record<string, ActivityCost>;
+  /** Where green and red actually sit for this athlete; filled in with
+   *  recoveryBands(). */
+  bands: Bands;
 };
 
 /** "18:00" -> "6pm", "18:30" -> "6:30pm". Anything unparseable passes through. */
@@ -202,6 +205,8 @@ export function personalFrom(cfg: Record<string, any>): Personal {
     activities: inputs.activities,
     activityCosts: {},
     sessionCosts: {},
+    bands: { green: DEFAULT_TUNABLES.recovery_green, red: DEFAULT_TUNABLES.recovery_red,
+             n: 0, source: "default", shift: 0 },
   };
 }
 
@@ -1368,12 +1373,17 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
                             hrvStreak?: number; intervalsReady?: boolean;
                             easyMinutes?: number; personal?: Personal;
                             defaultSets?: number;
+                            /** How much of the session to do, 0-1, from where
+                             *  the morning sits between this athlete's lines.
+                             *  Without it, one flat amber amount. */
+                            scale?: number;
                             /** Primary muscle of a logged name, from the athlete's alias map. */
                             muscleOf?: (name: string) => string | null | undefined;
                             /** The athlete's local date, for "recent". */
                             today?: string;
                           } = {}) {
   const personal = opts.personal ?? personalFrom({});
+  const scale = level === "green" ? 1 : opts.scale ?? 0.8;
   const items: string[] = [];
   const blocks: SessionBlock[] = [];
   let source: string | null = null;
@@ -1406,7 +1416,10 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
                                personal.goals.includes("strength") ? 2 : 3, personal.manualLifts);
       // A short last session (one heavy single, a cut-short day) is not the
       // program: the prescription is at least the default set count.
-      const nSets = Math.max(e.sets, opts.defaultSets ?? DEFAULT_TUNABLES.default_sets);
+      // Below the green line the sets come down with the number rather than
+      // by a flat amount, but never below two: one set is not a stimulus.
+      const full = Math.max(e.sets, opts.defaultSets ?? DEFAULT_TUNABLES.default_sets);
+      const nSets = scale === 1 ? full : Math.max(2, Math.round(full * scale));
       (tier >= 2 ? circuit : straight).push(
         `${e.exercise} — ${nSets} x ${e.reps ?? "–"} @ ${load}` + (bump ? `  ↑ go to ${bump}` : ""));
     }
@@ -1423,10 +1436,10 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
 
   if (planned === "run" || (planned.endsWith("+run") && level === "green")) {
     const base = opts.easyMinutes ?? 25;
-    items.push(`Easy run — ${level === "green" ? base : Math.round(base * 0.8)} min, under ${z2} bpm`);
+    items.push(`Easy run — ${Math.round(base * scale)} min, under ${z2} bpm`);
   }
   if (planned === "long run") {
-    const mi = level === "green" ? longMi : Math.round(longMi * 0.75 * 10) / 10;
+    const mi = Math.round(longMi * scale * 10) / 10;
     items.push(`Long run — ${mi} mi, under ${z2} bpm`);
   }
   const activity = personal.activities.find((a) => a.sport === planned);
@@ -1485,6 +1498,105 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   };
 }
 
+/* --------------------------------------------------------------- bands */
+
+/** Where this athlete's green and red lines sit, and what put them there. */
+export type Bands = {
+  green: number;
+  red: number;
+  /** Mornings of their own recovery behind the lines. */
+  n: number;
+  source: "measured" | "default" | "profile";
+  /** Points the lines moved because of how this athlete responds to training
+   *  started low. Positive means they need more recovery in hand than their
+   *  own spread alone would suggest. */
+  shift: number;
+};
+
+/** Mornings before an athlete's own spread outweighs the default lines. */
+const BAND_PRIOR = 20;
+/** However unusual someone's WHOOP is, a line does not leave this range. */
+const GREEN_RANGE: [number, number] = [55, 78];
+const RED_RANGE: [number, number] = [22, 45];
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+function percentile(xs: number[], p: number): number {
+  const sorted = [...xs].sort((a, b) => a - b);
+  return sorted[clamp(Math.round((sorted.length - 1) * p), 0, sorted.length - 1)];
+}
+
+/**
+ * How much worse a training day goes for this athlete when they started it
+ * below their own middle. Mean reversion comes out first -- a low morning is
+ * followed by a better one whatever happens, which is exactly what makes raw
+ * numbers misleading here -- so what is left is the part the training is
+ * answerable for. Null until there are enough days on both sides.
+ */
+export function bandShift(rows: Record<string, DayRow>):
+    { shift: number; low: number; high: number; n: number } | null {
+  const rec: Record<string, number> = {};
+  for (const [d, r] of Object.entries(rows)) rec[d] = r.rec;
+  const predict = meanReversion(rec);
+  if (!predict) return null;
+  const trained = Object.values(rows).filter((r) => r.kind !== "rest");
+  if (trained.length < 2 * MIN_MEASURED) return null;
+  const mid = percentile(trained.map((r) => r.rec), 0.5);
+  const low: number[] = [], high: number[] = [];
+  for (const r of trained) (r.rec < mid ? low : high).push(r.next - predict(r.rec));
+  if (low.length < MIN_MEASURED || high.length < MIN_MEASURED) return null;
+  // Positive: training when already low costs this athlete more than training
+  // when fresh does. Half of it, because one gap is not a law.
+  const diff = mean(high) - mean(low);
+  return { shift: clamp(diff / 2, -5, 6), low: mean(low), high: mean(high),
+           n: low.length + high.length };
+}
+
+/**
+ * This athlete's own lines. WHOOP's 67 and 34 are the same number for
+ * everybody; these come from the athlete's own spread of mornings -- their
+ * upper middle and their bottom sixth -- and then move by what a day started
+ * low actually costs them. Blended toward the defaults until their own
+ * history outweighs them, and clamped so no line lands somewhere unsafe.
+ * A line pinned in the profile's tunables wins outright.
+ */
+export function recoveryBands(w: Rec, tun: Tunables,
+                              rows?: Record<string, DayRow>,
+                              pinned = false): Bands {
+  const base: Bands = { green: tun.recovery_green, red: tun.recovery_red, n: 0,
+                        source: pinned ? "profile" : "default", shift: 0 };
+  if (pinned) return base;
+  const hist = Object.values(recoveryByDay(w));
+  if (hist.length < 10) return base;
+  const weight = hist.length / (hist.length + BAND_PRIOR);
+  const blend = (own: number, def: number) => own * weight + def * (1 - weight);
+  const s = rows ? bandShift(rows) : null;
+  const shift = s ? Math.round(s.shift * 10) / 10 : 0;
+  return {
+    green: Math.round(clamp(blend(percentile(hist, 0.55), tun.recovery_green) + shift, ...GREEN_RANGE)),
+    red: Math.round(clamp(blend(percentile(hist, 0.15), tun.recovery_red) + shift, ...RED_RANGE)),
+    n: hist.length,
+    source: hist.length >= BAND_PRIOR ? "measured" : "default",
+    shift,
+  };
+}
+
+/** Where a morning sits between this athlete's lines: 0 at red, 1 at green. */
+export function readinessFraction(rec: number, b: Bands): number {
+  if (b.green <= b.red) return rec >= b.green ? 1 : 0;
+  return clamp((rec - b.red) / (b.green - b.red), 0, 1);
+}
+
+/**
+ * How much of the planned session to do, straight off the number. Full above
+ * the green line; between the lines it tapers with where the morning actually
+ * sits, so 63% and 41% stop being the same day.
+ */
+export function volumeScale(rec: number, b: Bands): number {
+  if (rec >= b.green) return 1;
+  return Math.round((0.6 + 0.35 * readinessFraction(rec, b)) * 20) / 20;
+}
+
 /* ------------------------------------------------------------- decision */
 
 export function decide(state: ReturnType<typeof buildState>,
@@ -1493,10 +1605,19 @@ export function decide(state: ReturnType<typeof buildState>,
                        personal: Personal = personalFrom({})) {
   const rec = state.recovery;
   const [planned, why] = template[state.dow];
-  let level = rec >= tun.recovery_green ? "green"
-            : rec < tun.recovery_red ? "red" : "yellow";
+  // Not WHOOP's three colours: this athlete's own lines, learned from their
+  // own spread of mornings and from what training on a low one costs them.
+  const bands = personal.bands;
+  let level = rec >= bands.green ? "green"
+            : rec < bands.red ? "red" : "yellow";
 
-  const reasons = [`Recovery ${Math.round(rec)}% (${level}).`];
+  const reasons = [`Recovery ${Math.round(rec)}% (${level}).`
+    + (bands.source === "measured"
+        ? ` Your own lines sit at ${bands.green}% and ${bands.red}%, from ${bands.n} mornings`
+          + (Math.abs(bands.shift) >= 0.5
+              ? ` and how much a day started low costs you (${bands.shift > 0 ? "+" : ""}${bands.shift}).`
+              : ".")
+        : "")];
   const down = (l: string) => (l === "green" ? "yellow" : "red");
 
   if (state.sleep_debt_h >= tun.sleep_debt_downgrade) {
@@ -1537,6 +1658,9 @@ export function decide(state: ReturnType<typeof buildState>,
   if (overCap)
     reasons.push(`Running ${tw} min this week vs ${lw} last — already at the ${Math.round(tun.max_weekly_mileage_growth * 100)}% cap.`);
 
+  // How much of the day survives, taken off the number itself rather than off
+  // the colour: 71% and 45% are both amber, and they are not the same day.
+  const scale = level === "red" ? 0 : volumeScale(rec, bands);
   let call: string, detail: string;
   const longMi = plan.long_run_this_week_mi;
   const tomorrowIsLongRun =
@@ -1578,7 +1702,7 @@ export function decide(state: ReturnType<typeof buildState>,
     if (tomorrowIsLongRun && activity.intensity !== "easy")
       detail += " Long run tomorrow, so ease off late in the session.";
   } else if (planned === "long run") {
-    let mi = level === "green" ? longMi : Math.round(longMi * 0.75 * 10) / 10;
+    let mi = Math.round(longMi * scale * 10) / 10;
     if (overCap) mi = Math.round(mi * 0.85 * 10) / 10;
     call = `Long run — ${mi} miles, easy.`;
     detail = `Stay under ${z2} bpm the whole way. ` + (plan.has_race
@@ -1597,7 +1721,9 @@ export function decide(state: ReturnType<typeof buildState>,
       detail = `Amber, so the lift goes: it costs you ${costText(liftCost)}, the run ${costText(runCost)}. Under ${z2} bpm.`;
     }
   } else if (hasEasyRun(planned)) {
-    call = level === "green" ? "Easy run, 25–30 minutes." : "Easy run, 20 minutes, or skip it.";
+    const mins = Math.max(10, Math.round((plan.easy_run_minutes ?? 25) * scale / 5) * 5);
+    call = level === "green" ? `Easy run, ${mins}–${mins + 5} minutes.`
+         : `Easy run, ${mins} minutes${scale <= 0.7 ? ", or skip it" : ""}.`;
     detail = `Under ${z2} bpm. An easy run costs you ${costText(runCost)}` +
       (runCost.source === "measured" ? "." : " — zone 2 is the experiment.");
     if (lift) detail += lift === "pull"
@@ -1621,5 +1747,5 @@ export function decide(state: ReturnType<typeof buildState>,
   }
 
   return { level, call, detail, planned, why_today: why, reasons,
-           zone2_ceiling: z2, deload_advised: deload };
+           zone2_ceiling: z2, deload_advised: deload, scale, bands };
 }
