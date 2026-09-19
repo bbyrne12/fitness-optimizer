@@ -3,9 +3,16 @@ import { Geist } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
-const defaultUrl = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : "http://localhost:3000";
+// The canonical address, for link previews. VERCEL_URL is the one-off
+// deployment hostname, which a preview card must not point at, so the
+// project's production domain wins.
+const defaultUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "http://localhost:3000");
 
 const TITLE = "Fitness Optimizer — one training decision every morning";
 const DESCRIPTION =
