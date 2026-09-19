@@ -173,6 +173,23 @@ export default function Home() {
             </div>
           </div>
 
+          <figure className="mt-10">
+            <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/screenshots/coach.png"
+                alt="The coach diagnosing a tired long run, proposing a change, and applying it"
+                loading="lazy"
+                className="w-full"
+              />
+            </div>
+            <figcaption className="mt-3 text-sm leading-relaxed text-zinc-400">
+              <span className="font-semibold text-white">The coach.</span>{" "}
+              It reads the week, points at the session that actually costs this athlete
+              the most, proposes one fix, and makes the change once they agree.
+            </figcaption>
+          </figure>
+
           <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2">
             {SHOTS.map(({ src, alt, title, caption }) => (
               <figure key={src} className="flex flex-col">
