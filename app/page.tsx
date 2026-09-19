@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ArrowRight, Activity, BarChart3, MessageSquare, NotebookPen } from "lucide-react";
 
+import { EmailSample } from "@/components/email-sample";
+
 const FEATURES = [
   {
     icon: Activity,
@@ -50,12 +52,6 @@ const STEPS = [
 ];
 
 const SHOTS = [
-  {
-    src: "/screenshots/morning-email.png",
-    alt: "The morning email: the day's call, the session in order, and one addition",
-    title: "The morning email",
-    caption: "The decision, the session in order, and why it looks like that.",
-  },
   {
     src: "/screenshots/training-plan.png",
     alt: "The training plan: weeks laid out to a race date",
@@ -153,10 +149,31 @@ export default function Home() {
               What it looks like
             </h2>
             <p className="mt-4 text-base text-zinc-400 md:text-lg">
-              Real mornings, from a real WHOOP account.
+              Two mornings: one where the session goes ahead, one where recovery says
+              hold back. Sample data, not a real member&apos;s.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <div>
+              <EmailSample variant="green" />
+              <p className="mt-3 text-sm leading-relaxed text-zinc-400">
+                <span className="font-semibold text-white">A good morning.</span>{" "}
+                79% recovered, so the long run goes ahead at full distance, with the
+                core routine they already do.
+              </p>
+            </div>
+            <div>
+              <EmailSample variant="hold" />
+              <p className="mt-3 text-sm leading-relaxed text-zinc-400">
+                <span className="font-semibold text-white">A bad one.</span>{" "}
+                45% and sleep debt: the session stays, the intensity comes off, weights
+                hold where they were, and breathing work is added because HRV has been low.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2">
             {SHOTS.map(({ src, alt, title, caption }) => (
               <figure key={src} className="flex flex-col">
                 <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -239,6 +256,9 @@ export default function Home() {
           <span>
             Not affiliated with WHOOP. Training guidance, not medical advice.
           </span>
+          <Link href="/privacy" className="hover:text-zinc-300">
+            Privacy
+          </Link>
           <span>2026</span>
         </div>
       </footer>

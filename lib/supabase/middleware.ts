@@ -37,6 +37,9 @@ export async function updateSession(request: NextRequest) {
     !user &&
     !request.nextUrl.pathname.startsWith("/auth") &&
     !request.nextUrl.pathname.startsWith("/login") &&
+    // The privacy policy has to be readable by anyone, including WHOOP's
+    // reviewers, who have no account here.
+    !request.nextUrl.pathname.startsWith("/privacy") &&
     request.nextUrl.pathname !== "/"
   ) {
     const url = request.nextUrl.clone();
