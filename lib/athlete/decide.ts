@@ -296,10 +296,12 @@ const median = (xs: number[]) => {
  * recovery at the first wake, so the decision would be made on half a night.
  *
  * It waits until the night stops looking short -- the next poll sees the
- * fuller sleep and the real recovery -- or until the cutoff, which is two and
- * a half hours past their usual wake and never past midday. Someone genuinely
- * up early after a bad night is not made to wait all morning, and nobody is
- * emailed a decision built on four hours when they slept eight.
+ * fuller sleep and the real recovery -- or until the cutoff, four hours past
+ * their usual wake and never past one in the afternoon. Anything WHOOP
+ * records them doing today ends the wait immediately: someone who is up and
+ * training is up, whatever the night was. Late beats wrong here, because a
+ * decision built on four hours when they slept eight is the wrong session for
+ * the whole day.
  *
  * `notBefore` is the athlete's own floor in local minutes, if they set one.
  */
@@ -320,14 +322,17 @@ export function prematureMorning(w: Rec, nowMs = Date.now(), notBefore?: number 
   const now = localMinutes(new Date(nowMs).toISOString(), off);
   const nowDay = localDay(new Date(nowMs).toISOString(), off);
   const clock = (m: number) => `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, "0")}`;
-  // How long a short morning may be held: two and a half hours past the usual
-  // wake, never past midday, and at least an hour whatever the usual is.
-  const cutoff = Math.min(Math.max(usualWake + 150, usualWake + 60), 12 * 60);
+  // How long a short morning may be held: four hours past the usual wake,
+  // never past one in the afternoon, and at least an hour whatever the usual.
+  const cutoff = Math.min(Math.max(usualWake + 240, usualWake + 60), 13 * 60);
   const short = slept < 0.85 * usualHours;
   // Waking an hour or more later than usual and still short means the night
   // is over and it was a bad one. Waiting cannot add to it.
   const couldStillBeAsleep = woke <= usualWake + 60;
-  const wait = nowDay === today && short && couldStillBeAsleep && now < cutoff;
+  // Anything recorded today: they are up, so there is nothing to wait for.
+  const upAndAbout = (w.workouts ?? []).some(
+    (x: Rec) => localDay(x.start, x.timezone_offset) === today);
+  const wait = nowDay === today && short && couldStillBeAsleep && !upAndAbout && now < cutoff;
   // The athlete's own floor is separate: no decision before this time, however
   // the night went.
   const early = nowDay === today && notBefore != null && now < notBefore;
