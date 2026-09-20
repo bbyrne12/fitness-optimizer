@@ -54,6 +54,10 @@ const config: Record<string, unknown> = {
   utc_offset_minutes: -240,
   email_daily: false,
   email_to: null,
+  // What marks this account as the demo one. The database reads it to refuse
+  // writes from its session, and the app reads it to say so kindly rather
+  // than showing a policy error.
+  demo: true,
   whoop_summary: { updated: today, sports: [], sport_days: {}, max_heart_rate: 191, resting_heart_rate: 52 },
 };
 

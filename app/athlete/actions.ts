@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { disconnect } from "@/lib/athlete/whoop";
 import { FOCUS_MUSCLES, RACE_DISTANCES, type Distance } from "@/lib/athlete/decide";
 import { readNotes } from "@/lib/athlete/notes";
+import { DEMO_MESSAGE, isDemo } from "@/lib/athlete/demo";
 
 export type SetupResult = { ok: boolean; message: string };
 
@@ -110,6 +111,7 @@ export async function saveAthleteProfile(
   const { data: existing } = await supabase
     .from("athlete_profile").select("config").eq("user_id", user.id).maybeSingle();
   const prev = (existing?.config ?? {}) as Record<string, any>;
+  if (isDemo(prev)) return fail(DEMO_MESSAGE);
 
   // The notes are read by Claude into the things the engine acts on -- lifts
   // to hold, per-session cues -- once, when they change. Unchanged notes keep

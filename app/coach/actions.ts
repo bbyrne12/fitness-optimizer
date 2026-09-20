@@ -10,6 +10,7 @@ import { applyPlanPatch, GOALS, type PlanPatch } from "@/lib/athlete/plan-patch"
 import { readNotes } from "@/lib/athlete/notes";
 import { planInputs, weekTemplate, kindLabel, FOCUS_MUSCLES, RACE_DISTANCES } from "@/lib/athlete/decide";
 import { runMorning } from "@/lib/athlete/run-morning";
+import { isDemo } from "@/lib/athlete/demo";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 export type CoachReply = { reply: string; applied: string[]; error?: string };
@@ -122,7 +123,8 @@ Rules:
 - When what they ask for does not match what is scheduled, say in one sentence what is actually on that day, then offer the nearest change you can make and ask one short question. Do not list several readings of what they might have meant.
 - Say plainly when something is outside what the plan can do, and offer the nearest thing it can.
 - Never invent an injury, result or number. If you do not know, say so.
-- Do not give medical advice beyond training adjustments; a persistent injury is a reason to see a clinician.`;
+- Do not give medical advice beyond training adjustments; a persistent injury is a reason to see a clinician.
+- If the context says demo_account, this is a sample athlete whose data is invented and whose account saves nothing. Answer every question about the plan normally. When they ask for a change, say in one sentence what you would change and that the demo account does not save it, without apologising twice or offering workarounds.`;
 
 /**
  * Redo today's decision from WHOOP as it stands now. The morning poll takes
@@ -283,6 +285,7 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
         ? { green: dec.decision.bands.green, red: dec.decision.bands.red,
             mornings_behind_them: dec.decision.bands.n, source: dec.decision.bands.source }
         : null,
+      demo_account: isDemo(cfg) || undefined,
       week_template: weekTemplate(inputs),
       learned_costs: learned,
       today: localToday,
@@ -328,12 +331,25 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const block of res.content) {
         if (block.type !== "tool_use") continue;
+        if (block.name === RECHECK.name && isDemo(cfg)) {
+          results.push({ type: "tool_result", tool_use_id: block.id,
+            content: JSON.stringify({ redone: false, demo: true }) });
+          continue;
+        }
         if (block.name === RECHECK.name) {
           results.push({ type: "tool_result", tool_use_id: block.id,
             ...(await recheck(user.id, cfg, (c) => { cfg = c; }, applied)) });
           continue;
         }
         const patch = block.input as PlanPatch;
+        if (isDemo(cfg)) {
+          // The demo athlete's session cannot write, by policy. Saying which
+          // change was understood keeps the conversation useful anyway.
+          const would = applyPlanPatch(cfg, patch).applied;
+          results.push({ type: "tool_result", tool_use_id: block.id,
+            content: JSON.stringify({ saved: false, demo: true, would_have_changed: would }) });
+          continue;
+        }
         const out = applyPlanPatch(cfg, patch);
         let config = out.config;
         // Changed notes are re-read into what the engine acts on, as the form does.
@@ -366,11 +382,13 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
       ? "I can't help with that one. Anything about your training plan, ask away."
       : res.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n").trim();
 
-    // What this turn cost, on the athlete's profile: the per-day guard reads it.
+    // What this turn cost, on the athlete's profile: the per-day guard reads
+    // it. Written with the service role, because the demo account cannot
+    // write and its spending has to count against the caps like anyone's.
     const next: Usage = { day: usage.day, messages: usage.messages + 1,
       input_tokens: usage.input_tokens + inTok, output_tokens: usage.output_tokens + outTok,
       usd: Math.round((usage.usd + usd) * 10000) / 10000 };
-    await supabase.from("athlete_profile").upsert(
+    await admin().from("athlete_profile").upsert(
       { user_id: user.id, config: { ...cfg, coach_usage: next }, updated_at: new Date().toISOString() },
       { onConflict: "user_id" });
 

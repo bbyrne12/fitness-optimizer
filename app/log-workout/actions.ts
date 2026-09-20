@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
+import { DEMO_MESSAGE, demoAccount } from "@/lib/athlete/demo";
 
 export type ExerciseSearchResult = {
   id: number;
@@ -67,6 +68,8 @@ export async function logWorkout(payload: {
     const { supabase, user, error: authError } = await getAuthedUser();
     if (authError || !user) return { error: authError ?? "Not authenticated" };
 
+    if (await demoAccount(supabase, user.id)) return { error: DEMO_MESSAGE };
+
     const { exerciseId, sets, reps, weight, dateKey } = payload;
     if (!Number.isFinite(exerciseId) || exerciseId <= 0) return { error: "Invalid exercise" };
     if (!Number.isFinite(sets) || sets <= 0) return { error: "Sets must be greater than 0" };
@@ -109,6 +112,7 @@ export async function deleteWorkoutLog(logId: string): Promise<{ error?: string 
   if (logId.startsWith("as:")) {
     const { supabase, user, error: authError } = await getAuthedUser();
     if (authError || !user) return { error: authError ?? "Not authenticated" };
+    if (await demoAccount(supabase, user.id)) return { error: DEMO_MESSAGE };
     // Row-level security already confines this to the athlete's own rows; the
     // user_id filter makes someone else's id a no-op without relying on it.
     const { error } = await supabase
@@ -122,6 +126,8 @@ export async function deleteWorkoutLog(logId: string): Promise<{ error?: string 
   try {
     const { supabase, user, error: authError } = await getAuthedUser();
     if (authError || !user) return { error: authError ?? "Not authenticated" };
+
+    if (await demoAccount(supabase, user.id)) return { error: DEMO_MESSAGE };
 
     const { error } = await supabase
       .from("workout_logs")

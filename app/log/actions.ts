@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { parseLog } from "@/lib/athlete/parse-log";
 import { resolveExercises, type AliasMap } from "@/lib/athlete/resolve-exercises";
+import { DEMO_MESSAGE, isDemo } from "@/lib/athlete/demo";
 
 export type SaveResult = {
   ok: boolean;
@@ -38,6 +39,7 @@ export async function saveLog(
   const { data: prof } = await supabase
     .from("athlete_profile").select("config").eq("user_id", user.id).maybeSingle();
   const cfg = (prof?.config ?? {}) as Record<string, any>;
+  if (isDemo(cfg)) return { ok: false, message: DEMO_MESSAGE };
   // The athlete's local "today", so a session typed at 9pm does not land on
   // tomorrow's date. The offset is learned from their WHOOP records.
   const today = new Date(Date.now() + (cfg.utc_offset_minutes ?? 0) * 60_000)
