@@ -24,6 +24,7 @@ export type PlanPatch = {
   cues?: Record<string, string>;
   email_daily?: boolean;
   email_to?: string | null;
+  morning_not_before?: string | null;
 };
 
 export type PatchResult = {
@@ -144,6 +145,19 @@ export function applyPlanPatch(prev: Record<string, any>, patch: PlanPatch): Pat
   if (patch.email_daily !== undefined) {
     config.email_daily = Boolean(patch.email_daily);
     applied.push(config.email_daily ? "Morning email: on" : "Morning email: off, decision shows in the app");
+  }
+
+  // The earliest the morning decision may go out, in the athlete's own local
+  // time. It does not schedule anything: it holds the decision back so a
+  // recovery score from a 5am wake is not what the day gets built on.
+  if (patch.morning_not_before !== undefined) {
+    const t = String(patch.morning_not_before ?? "").trim();
+    const m = /^(\d{1,2}):(\d{2})$/.exec(t);
+    if (!t) { config.morning_not_before = null; applied.push("Morning email: as soon as WHOOP scores you"); }
+    else if (m && Number(m[1]) < 24 && Number(m[2]) < 60 && Number(m[1]) * 60 + Number(m[2]) <= 12 * 60) {
+      config.morning_not_before = `${m[1].padStart(2, "0")}:${m[2]}`;
+      applied.push(`Morning email: nothing before ${config.morning_not_before}`);
+    } else rejected.push("Earliest morning time: use a time like 07:30, and no later than midday.");
   }
 
   if (patch.email_to !== undefined) {

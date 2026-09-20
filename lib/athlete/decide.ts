@@ -290,14 +290,20 @@ const median = (xs: number[]) => {
 };
 
 /**
- * Whether this morning's recovery is probably premature: the night was well
- * short of the athlete's usual, it ended well before their usual wake time,
- * and that usual time has not yet passed. That is what waking for a while and
- * going back to sleep looks like, and WHOOP scores recovery at the first
- * wake. Waiting until just past the usual wake time lets the rest of the
- * night count; after that the decision goes out whatever WHOOP has.
+ * Whether this morning's recovery is probably premature: the night is well
+ * short of the athlete's usual and they could still be in it. That is what
+ * waking for a while and going back to sleep looks like, and WHOOP scores
+ * recovery at the first wake, so the decision would be made on half a night.
+ *
+ * It waits until the night stops looking short -- the next poll sees the
+ * fuller sleep and the real recovery -- or until the cutoff, which is two and
+ * a half hours past their usual wake and never past midday. Someone genuinely
+ * up early after a bad night is not made to wait all morning, and nobody is
+ * emailed a decision built on four hours when they slept eight.
+ *
+ * `notBefore` is the athlete's own floor in local minutes, if they set one.
  */
-export function prematureMorning(w: Rec, nowMs = Date.now()) {
+export function prematureMorning(w: Rec, nowMs = Date.now(), notBefore?: number | null) {
   const mains = (w.sleep ?? []).filter((s: Rec) => s.score && !s.nap)
     .sort((a: Rec, b: Rec) => String(b.end).localeCompare(String(a.end)));
   const last = mains[0];
@@ -314,17 +320,30 @@ export function prematureMorning(w: Rec, nowMs = Date.now()) {
   const now = localMinutes(new Date(nowMs).toISOString(), off);
   const nowDay = localDay(new Date(nowMs).toISOString(), off);
   const clock = (m: number) => `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, "0")}`;
-  const wait = nowDay === today && slept < 0.8 * usualHours
-    && woke < usualWake - 60 && now < usualWake + 30;
+  // How long a short morning may be held: two and a half hours past the usual
+  // wake, never past midday, and at least an hour whatever the usual is.
+  const cutoff = Math.min(Math.max(usualWake + 150, usualWake + 60), 12 * 60);
+  const short = slept < 0.85 * usualHours;
+  // Waking an hour or more later than usual and still short means the night
+  // is over and it was a bad one. Waiting cannot add to it.
+  const couldStillBeAsleep = woke <= usualWake + 60;
+  const wait = nowDay === today && short && couldStillBeAsleep && now < cutoff;
+  // The athlete's own floor is separate: no decision before this time, however
+  // the night went.
+  const early = nowDay === today && notBefore != null && now < notBefore;
+  const usual = Math.round(usualHours * 10) / 10;
   return {
-    wait,
+    wait: wait || early,
     slept_h: slept,
-    usual_h: Math.round(usualHours * 10) / 10,
+    usual_h: usual,
     woke: clock(woke),
     usual_wake: clock(usualWake),
+    cutoff: clock(cutoff),
     reason: wait
-      ? `short night (${slept}h vs your usual ${Math.round(usualHours * 10) / 10}h) that ended at ${clock(woke)}; waiting until after your usual ${clock(usualWake)} wake in case you went back to sleep`
-      : null,
+      ? `short night (${slept}h against your usual ${usual}h) that ended at ${clock(woke)}; holding in case you went back to sleep, and sending by ${clock(cutoff)} either way`
+      : early
+        ? `you asked for nothing before ${clock(notBefore!)}`
+        : null,
   };
 }
 

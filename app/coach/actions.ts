@@ -2,12 +2,14 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 
 import { createClient } from "@/lib/supabase/server";
 import { admin, retrying } from "@/lib/athlete/supabase";
 import { applyPlanPatch, GOALS, type PlanPatch } from "@/lib/athlete/plan-patch";
 import { readNotes } from "@/lib/athlete/notes";
 import { planInputs, weekTemplate, kindLabel, FOCUS_MUSCLES, RACE_DISTANCES } from "@/lib/athlete/decide";
+import { runMorning } from "@/lib/athlete/run-morning";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 export type CoachReply = { reply: string; applied: string[]; error?: string };
@@ -71,8 +73,23 @@ const TOOL: Anthropic.Tool = {
         description: "One-line reminders per session type: push, pull, legs, upper, full body, long run, run. Empty string removes one." },
       email_daily: { type: "boolean" },
       email_to: { type: ["string", "null"] },
+      morning_not_before: { type: ["string", "null"],
+        description: "Earliest local time the morning decision may be sent, like \"07:30\", or null for as soon as WHOOP scores them. Use when they are being emailed too early. Midday at the latest." },
     },
   },
+};
+
+/** Rechecks a day at most this many times, so a WHOOP pull and an email are
+ *  not something a conversation can spend without limit. */
+const RECHECKS_PER_DAY = 3;
+
+const RECHECK: Anthropic.Tool = {
+  name: "recheck_morning",
+  description:
+    "Read the athlete's WHOOP again and redo today's decision from what is there now, replacing the one already made and sending it again if they have the morning email on. " +
+    "Use it when WHOOP scored them before they had finished sleeping -- they woke briefly, went back to sleep, and the decision was built on a short night -- or whenever they say this morning's numbers are wrong or out of date. " +
+    "Only after they ask; it costs them a WHOOP read and an email.",
+  input_schema: { type: "object", properties: {} },
 };
 
 // Fixed for every athlete and every turn, so it is cached; the athlete's own
@@ -84,7 +101,8 @@ You help the athlete adjust their plan in conversation, the way they would with 
 How the plan works, so you can explain it:
 - Goals: hrv (raise HRV and recovery; slow breathing is added when HRV dips), race (a build to a race date, long run on the chosen weekend day), strength (loads progress after two clean sessions instead of three), general.
 - Week: activities are placed on their days first; the long run on Sat or Sun with a rest day after; lifts fill the remaining days by split (1 full body, 2 legs/upper, 3 legs/pull/push, 4 adds legs, 5 adds upper); runs stack onto pull or upper days when there is no free day.
-- Each morning: recovery 67%+ is green, under 34% is red, between is amber. Sleep debt, an HRV streak below the athlete's band, and resting heart rate over baseline can push it down. Amber holds weights; red is rest.
+- Each morning: green and red are this athlete's own lines, not WHOOP's 67 and 34. They are learned from the athlete's own spread of mornings and then moved by how much a day started low costs them; their current lines are in the context as recovery_lines. Between the lines the session scales with the number itself, so a 62% day keeps more of the plan than a 45% one. Sleep debt, an HRV streak below their band, and resting heart rate over baseline can push the day down. Below the lower line is rest.
+- The morning decision is made from the first recovery WHOOP scores, which lands shortly after they wake. A short night that they might still be in is held back until it looks whole, and sent by early afternoon at the latest. If they say the email came before they had finished sleeping, or that its sleep and recovery are wrong, use recheck_morning to redo the day from WHOOP as it stands now, and offer to set an earliest time with morning_not_before so it cannot happen again.
 - Learned costs: next-morning recovery points each kind of day costs this athlete against a rest day, with that night's sleep held equal, fit on their whole WHOOP history. Blended toward a default until there are at least five measured days. Runs are bucketed by the athlete's own heart-rate zones (zone 2, long, hard), never by duration. Alcohol, illness and stress are not in the data, so a number is an estimate, and the athlete should not over-read small differences.
 - Reading those numbers: they are negative, and the more negative one is the bigger cost. -8.1 costs more than -7.4. Rank by size before calling anything the most or least expensive, and check what you say against the number you quote. A weekly total is the cost times the days it is done, which can outrank a dearer session done once.
 - Loads come from the athlete's own log: the last session of that kind, with a bump once the same load has been done cleanly enough times, except lifts held at current weight.
@@ -105,6 +123,59 @@ Rules:
 - Say plainly when something is outside what the plan can do, and offer the nearest thing it can.
 - Never invent an injury, result or number. If you do not know, say so.
 - Do not give medical advice beyond training adjustments; a persistent injury is a reason to see a clinician.`;
+
+/**
+ * Redo today's decision from WHOOP as it stands now. The morning poll takes
+ * the first recovery WHOOP scores, which on a broken night is scored before
+ * the night is over; this is the athlete saying "look again", so it runs the
+ * same code the scheduler runs, with today's row replaced rather than kept.
+ *
+ * Capped per day: it spends a WHOOP read and an email every time.
+ */
+async function recheck(userId: string, cfg: Record<string, any>,
+                       keep: (c: Record<string, any>) => void, applied: string[]):
+    Promise<{ content: string; is_error?: boolean }> {
+  const day = today();
+  const used = cfg.recheck?.day === day ? Number(cfg.recheck.count ?? 0) : 0;
+  if (used >= RECHECKS_PER_DAY)
+    return { is_error: true, content: `Already rechecked ${used} times today, which is the limit. It will be right again tomorrow morning.` };
+
+  const db = admin();
+  // Counted before the run, not after: a run that fails halfway still spent
+  // the WHOOP read.
+  await retrying(() => db.from("athlete_profile")
+    .update({ config: { ...cfg, recheck: { day, count: used + 1 } } }).eq("user_id", userId));
+
+  const host = (await headers()).get("host");
+  const origin = process.env.NEXT_PUBLIC_SITE_URL
+    ?? (host ? `https://${host}` : "https://fitness-optimizer.vercel.app");
+  let out: Record<string, any>;
+  try {
+    out = await runMorning(db, userId, { dry: false, force: true, origin }) as Record<string, any>;
+  } catch (e) {
+    return { is_error: true, content: `Could not reach WHOOP just now: ${e instanceof Error ? e.message : String(e)}` };
+  }
+
+  // runMorning writes the profile itself (the day's learning, the time zone),
+  // so what is held here is stale until it is read back.
+  const { data: fresh } = await retrying(() => db.from("athlete_profile")
+    .select("config").eq("user_id", userId).maybeSingle());
+  if (fresh?.config) keep(fresh.config as Record<string, any>);
+
+  const { data: row } = await retrying(() => db.from("decision_log")
+    .select("day,decision").eq("user_id", userId).eq("day", String(out.day ?? day)).maybeSingle());
+  const dec = (row?.decision ?? {}) as Record<string, any>;
+  if (out.waiting)
+    return { content: JSON.stringify({ redone: false, waiting: true, reason: out.reason ?? out.expecting }) };
+
+  applied.push(out.sent ? "Today's decision redone and re-sent" : "Today's decision redone");
+  return { content: JSON.stringify({
+    redone: true, emailed: Boolean(out.sent), day: out.day,
+    recovery: dec.state?.recovery, sleep_h: dec.state?.sleep_hours,
+    level: dec.decision?.level, call: dec.decision?.call,
+    reasons: dec.decision?.reasons,
+  }) };
+}
 
 type Usage = { day: string; messages: number; input_tokens: number; output_tokens: number; usd: number };
 
@@ -206,7 +277,12 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
         focus_muscles: cfg.focus_muscles ?? [], notes: cfg.notes ?? null,
         manual_lifts: cfg.manual_lifts ?? [], cues: cfg.cues ?? {},
         email_daily: cfg.email_daily !== false, email_to: cfg.email_to ?? null,
+        morning_not_before: cfg.morning_not_before ?? null,
       },
+      recovery_lines: dec.decision?.bands
+        ? { green: dec.decision.bands.green, red: dec.decision.bands.red,
+            mornings_behind_them: dec.decision.bands.n, source: dec.decision.bands.source }
+        : null,
       week_template: weekTemplate(inputs),
       learned_costs: learned,
       today: localToday,
@@ -239,7 +315,7 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
     model: MODEL, max_tokens: maxTokens,
     // A chat turn does not need deep deliberation; low effort keeps it cheap and quick.
     output_config: { effort: "low" },
-    system: system(), tools: [TOOL], messages,
+    system: system(), tools: [TOOL, RECHECK], messages,
   });
 
   try {
@@ -252,6 +328,11 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const block of res.content) {
         if (block.type !== "tool_use") continue;
+        if (block.name === RECHECK.name) {
+          results.push({ type: "tool_result", tool_use_id: block.id,
+            ...(await recheck(user.id, cfg, (c) => { cfg = c; }, applied)) });
+          continue;
+        }
         const patch = block.input as PlanPatch;
         const out = applyPlanPatch(cfg, patch);
         let config = out.config;
