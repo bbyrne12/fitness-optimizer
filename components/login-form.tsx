@@ -14,17 +14,32 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import { demoLogin } from "@/app/auth/login/actions";
 
 export function LoginForm({
   className,
+  demo = false,
   ...props
-}: React.ComponentPropsWithoutRef<"div">) {
+}: React.ComponentPropsWithoutRef<"div"> & { demo?: boolean }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
+
+  // The demo login, filled in rather than typed: from the button below, or
+  // straight away when the landing page's demo link brought them here.
+  const fillDemo = async () => {
+    const d = await demoLogin();
+    if (d) { setEmail(d.email); setPassword(d.password); setError(null); }
+  };
+  useEffect(() => {
+    if (demo && new URLSearchParams(window.location.search).get("demo") === "1") void fillDemo();
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,6 +74,16 @@ export function LoginForm({
         <CardContent>
           <form onSubmit={handleLogin}>
             <div className="flex flex-col gap-6">
+              {demo && (
+                <button
+                  type="button"
+                  onClick={fillDemo}
+                  className="rounded-md border border-dashed border-zinc-700 px-3 py-2 text-left text-sm text-zinc-400 transition-colors hover:border-lime-400/50 hover:text-lime-300"
+                >
+                  Just looking? <span className="font-medium text-zinc-200">Fill in the demo account</span>, an
+                  invented athlete with made-up data.
+                </button>
+              )}
               <div className="grid gap-2">
                 <Label htmlFor="email">Email</Label>
                 <Input

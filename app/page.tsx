@@ -116,6 +116,12 @@ export default function Home() {
           <p className="mt-5 text-xs text-zinc-500">
             Free. A WHOOP membership is what it reads from.
           </p>
+          <Link
+            href="/auth/login?demo=1"
+            className="mt-3 text-sm text-zinc-400 underline-offset-4 transition-colors hover:text-lime-300 hover:underline"
+          >
+            No WHOOP? See it with sample data
+          </Link>
         </div>
       </section>
 

@@ -11,9 +11,16 @@ import { readNotes } from "@/lib/athlete/notes";
 import { planInputs, weekTemplate, kindLabel, FOCUS_MUSCLES, RACE_DISTANCES } from "@/lib/athlete/decide";
 import { runMorning } from "@/lib/athlete/run-morning";
 import { isDemo } from "@/lib/athlete/demo";
+import {
+  cacheReply, cachedReply, planHash, spendDemo, takeDemoMessage, visitorKeys,
+  DEMO_MAX_ROUNDS, DEMO_MAX_TOKENS, DEMO_MAX_TURNS, type VisitorKeys,
+} from "@/lib/athlete/demo-coach";
+import { DEMO_STARTERS, type DemoLimit } from "./demo-content";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
-export type CoachReply = { reply: string; applied: string[]; error?: string };
+// `limited` is the demo's way of saying no: never an error, always a page
+// that still shows what the coach does. Real athletes get `error`.
+export type CoachReply = { reply: string; applied: string[]; error?: string; limited?: DemoLimit };
 
 // The coach runs on the app's one API key, so what it may spend is capped
 // here as well as in the Console: dollars per athlete per day, and dollars
@@ -193,11 +200,15 @@ function usageOf(cfg: Record<string, any>): Usage {
     : { day: today(), messages: 0, input_tokens: 0, output_tokens: 0, usd: 0 };
 }
 
-/** Everyone's coach spend today, in dollars, for the shared cap. */
+/** Real athletes' coach spend today, in dollars, for the shared cap. The demo
+ *  is left out: it has a budget of its own, so reviewers cannot use up the
+ *  coach for the people actually training with it. */
 async function spentToday(): Promise<number> {
-  const { data } = await retrying(() => admin().from("athlete_profile").select("config->coach_usage"));
+  const { data } = await retrying(() => admin().from("athlete_profile")
+    .select("config->coach_usage, config->demo"));
   const d = today();
   return (data ?? []).reduce((n: number, r: any) => {
+    if (r.demo === true) return n;
     const u = r.coach_usage as Usage | null;
     return n + (u && u.day === d ? u.usd ?? 0 : 0);
   }, 0);
@@ -217,15 +228,33 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
     .from("athlete_profile").select("config").eq("user_id", user.id).maybeSingle();
   let cfg = (prof?.config ?? {}) as Record<string, any>;
 
-  // Spend guards, before anything is sent.
-  const usage = usageOf(cfg);
-  if (usage.usd >= USER_DAILY_USD || (await spentToday()) >= ALL_DAILY_USD)
-    return { reply: "", applied: [], error: LIMIT_MESSAGE };
-
   // The athlete's own local day, so "yesterday" means theirs.
   const shiftDay = (d: string, n: number) => new Date(Date.parse(d) + n * 864e5).toISOString().slice(0, 10);
   const localToday = new Date(Date.now() + Number(cfg.utc_offset_minutes ?? 0) * 60_000)
     .toISOString().slice(0, 10);
+
+  // Spend guards, before anything is sent. The demo's are its own: one budget
+  // for every reviewer, split between them, and never an error when it runs
+  // out. A suggested prompt already answered today is free, so it is served
+  // before any limit is looked at.
+  const demo = isDemo(cfg);
+  const starter = demo && history.length === 0 && DEMO_STARTERS.includes(text);
+  const hash = starter ? planHash(cfg) : "";
+  let keys: VisitorKeys | null = null;
+  const usage = usageOf(cfg);
+  if (demo) {
+    if (starter) {
+      const hit = await cachedReply(localToday, text, hash);
+      if (hit) return { reply: hit, applied: [] };
+    }
+    if (history.filter((m) => m.role === "user").length >= DEMO_MAX_TURNS)
+      return { reply: "", applied: [], limited: "turns" };
+    keys = await visitorKeys();
+    const verdict = await takeDemoMessage(today(), keys);
+    if (verdict !== "ok") return { reply: "", applied: [], limited: verdict };
+  } else if (usage.usd >= USER_DAILY_USD || (await spentToday()) >= ALL_DAILY_USD) {
+    return { reply: "", applied: [], error: LIMIT_MESSAGE };
+  }
   const RECENT_DAYS = 21;
   const from = shiftDay(localToday, -RECENT_DAYS);
 
@@ -304,7 +333,7 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
 
   const client = new Anthropic({ apiKey });
   const messages: Anthropic.MessageParam[] = [
-    ...history.slice(-HISTORY).map((m) => ({ role: m.role, content: m.content })),
+    ...history.slice(-(demo ? DEMO_MAX_TURNS * 2 : HISTORY)).map((m) => ({ role: m.role, content: m.content })),
     { role: "user", content: text },
   ];
   const applied: string[] = [];
@@ -318,7 +347,7 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
     usd += (u.input_tokens * pin + read * pin * 0.1 + write * pin * 1.25 + u.output_tokens * pout) / 1e6;
   };
   const ask = (maxTokens: number) => client.messages.create({
-    model: MODEL, max_tokens: maxTokens,
+    model: MODEL, max_tokens: demo ? Math.min(maxTokens, DEMO_MAX_TOKENS) : maxTokens,
     // A chat turn does not need deep deliberation; low effort keeps it cheap and quick.
     output_config: { effort: "low" },
     system: system(), tools: [TOOL, RECHECK], messages,
@@ -330,7 +359,9 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
 
     // One round of tool use is enough for a plan change; the next call lets
     // the coach say what it did, with the result of applying it in hand.
-    for (let round = 0; round < MAX_ROUNDS && res.stop_reason === "tool_use"; round++) {
+    let usedTools = false;
+    for (let round = 0; round < (demo ? DEMO_MAX_ROUNDS : MAX_ROUNDS) && res.stop_reason === "tool_use"; round++) {
+      usedTools = true;
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const block of res.content) {
         if (block.type !== "tool_use") continue;
@@ -378,15 +409,22 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
       ? "I can't help with that one. Anything about your training plan, ask away."
       : res.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n").trim();
 
-    // What this turn cost, on the athlete's profile: the per-day guard reads
-    // it. Written with the service role, because the demo account cannot
-    // write and its spending has to count against the caps like anyone's.
-    const next: Usage = { day: usage.day, messages: usage.messages + 1,
-      input_tokens: usage.input_tokens + inTok, output_tokens: usage.output_tokens + outTok,
-      usd: Math.round((usage.usd + usd) * 10000) / 10000 };
-    await admin().from("athlete_profile").upsert(
-      { user_id: user.id, config: { ...cfg, coach_usage: next }, updated_at: new Date().toISOString() },
-      { onConflict: "user_id" });
+    if (demo) {
+      await spendDemo(today(), keys!, usd);
+      // Only a plain answer is reused: a reply that changed the plan would,
+      // replayed, claim a change that was never made for the next visitor.
+      if (starter && reply && !usedTools && res.stop_reason === "end_turn")
+        await cacheReply(localToday, text, hash, reply);
+    } else {
+      // What this turn cost, on the athlete's profile: the per-day guard
+      // reads it. Written with the service role, which no policy can refuse.
+      const next: Usage = { day: usage.day, messages: usage.messages + 1,
+        input_tokens: usage.input_tokens + inTok, output_tokens: usage.output_tokens + outTok,
+        usd: Math.round((usage.usd + usd) * 10000) / 10000 };
+      await admin().from("athlete_profile").upsert(
+        { user_id: user.id, config: { ...cfg, coach_usage: next }, updated_at: new Date().toISOString() },
+        { onConflict: "user_id" });
+    }
 
     if (applied.length) {
       revalidatePath("/athlete"); revalidatePath("/calendar"); revalidatePath("/protected"); revalidatePath("/coach");
@@ -394,6 +432,12 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
     return { reply: reply || (applied.length ? "Done." : "…"), applied };
   } catch (e) {
     console.error("[coach]", e instanceof Error ? e.message : e);
+    if (demo && keys && usd > 0) await spendDemo(today(), keys, usd);
+    // The account's own limits upstream (rate, or the Console's spend cap)
+    // are limits too, and the demo never shows those as errors.
+    if (demo && e instanceof Anthropic.APIError &&
+        (e.status === 429 || /credit|spend|usage limit/i.test(e.message)))
+      return { reply: "", applied, limited: "budget" };
     return { reply: "", applied, error: "The coach could not answer just now. Try again in a moment." };
   }
 }

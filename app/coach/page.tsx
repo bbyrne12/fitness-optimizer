@@ -4,6 +4,7 @@ import { Suspense } from "react";
 
 import { AppNav } from "@/components/app-nav";
 import { createClient } from "@/lib/supabase/server";
+import { isDemo } from "@/lib/athlete/demo";
 
 import { CoachChat } from "./coach-chat";
 
@@ -28,7 +29,7 @@ async function CoachContent() {
   }
 
   const firstName = user.email ? user.email.split("@")[0] : "there";
-  return <CoachChat firstName={firstName} />;
+  return <CoachChat firstName={firstName} demo={isDemo(cfg)} />;
 }
 
 export default function CoachPage() {

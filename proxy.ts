@@ -1,8 +1,21 @@
 import { updateSession } from "@/lib/supabase/middleware";
 import { type NextRequest } from "next/server";
 
+// The name only: lib/athlete/demo-coach is server-only and not for the proxy.
+const VISITOR_COOKIE = "fo_visitor";
+
 export async function proxy(request: NextRequest) {
-  return await updateSession(request);
+  const response = await updateSession(request);
+  // An anonymous id for whoever opens the coach, set before their first
+  // message so the demo can count each reviewer separately. Random, holds
+  // nothing about them, and only the demo's budget ever reads it.
+  if (request.nextUrl.pathname.startsWith("/coach") && !request.cookies.get(VISITOR_COOKIE)) {
+    response.cookies.set(VISITOR_COOKIE, crypto.randomUUID(), {
+      httpOnly: true, sameSite: "lax", secure: request.nextUrl.protocol === "https:",
+      path: "/", maxAge: 60 * 60 * 24 * 30,
+    });
+  }
+  return response;
 }
 
 export const config = {
