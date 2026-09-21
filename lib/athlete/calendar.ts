@@ -102,6 +102,9 @@ export function buildCalendar(opts: {
   recentLongMi: number;
   consistencyWeeks: number;
   personal?: Personal;
+  /** Today's session when a missed lift was carried into it, so the calendar
+   *  shows what the morning actually asked for. This week only. */
+  carried?: { dow: string; slot: Slot } | null;
 }): { weeks: CalendarWeek[]; unlocked: ReturnType<typeof readiness> } {
   const { inputs, today } = opts;
   const z2 = inputs.zone2;
@@ -136,7 +139,8 @@ export function buildCalendar(opts: {
 
     const days: CalendarDay[] = DOW.map((dw, i) => {
       const date = shift(start, i);
-      const [kind, note] = (template[dw] ?? ["rest", ""]) as Slot;
+      const carried = w === 0 && opts.carried?.dow === dw ? opts.carried.slot : null;
+      const [kind, note] = carried ?? (template[dw] ?? ["rest", ""]) as Slot;
       return {
         date, dow: dw, kind, note,
         detail: detailFor(kind, cappedLong, easyMin, z2, meso.recovery_week, personal),

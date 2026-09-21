@@ -1062,6 +1062,51 @@ export function weekTemplate(
   return t;
 }
 
+/** Mon-first day of the week for a date. */
+const dowOf = (day: string) => DOW[(new Date(day + "T12:00:00Z").getUTCDay() + 6) % 7];
+
+/**
+ * A lift that was scheduled and did not happen comes forward to the next lift
+ * day, instead of the week carrying on and the session being lost. Rest on
+ * Saturday when push was due means push today, and legs waits its turn.
+ *
+ * Only a day with nothing at all recorded counts as missed: a day with a run
+ * or a match on it was traded, not skipped, and a lift made up since is not
+ * owed twice. Days WHOOP never scored are left alone rather than guessed at.
+ * It looks back four days, so a session missed last week stays missed.
+ */
+export function carryForward(
+  template: Record<string, Slot>,
+  kinds: Record<string, string[]>,
+  today: string,
+  lookback = 4,
+): { slot: Slot; from: string; kind: string; reason: string } | null {
+  const todaySlot = template[dowOf(today)];
+  const todayLift = liftOf(todaySlot?.[0]);
+  if (!todayLift) return null;
+
+  for (let i = lookback; i >= 1; i--) {
+    const day = shift(today, -i);
+    if (!(day in kinds) || kinds[day].length) continue;
+    const lift = liftOf(template[dowOf(day)]?.[0]);
+    if (!lift || lift === todayLift) continue;
+    // Done since on some other day: the athlete already moved it themselves.
+    let madeUp = false;
+    for (let d = shift(day, 1); d < today; d = shift(d, 1))
+      if ((kinds[d] ?? []).includes(`lift:${lift}`)) madeUp = true;
+    if (madeUp) continue;
+    const withRun = todaySlot[0].endsWith("+run") ? "+run" : "";
+    const reason = `Carried over from ${DAY_NAME[dowOf(day)]}, when nothing was trained.`;
+    return {
+      slot: [`${lift}${withRun}`, `${LIFT_LABEL[lift]}, moved here from ${DAY_NAME[dowOf(day)]}.`],
+      from: day,
+      kind: lift,
+      reason,
+    };
+  }
+  return null;
+}
+
 /* ---------------------------------------------------------------- lifting */
 
 export function classifyDay(vol: Record<string, number>): string {

@@ -15,7 +15,7 @@ import {
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
   runConsistencyWeeks, readiness, mesocycle, personalFrom, planInputs,
   whoopSportDays, mergeSportDays, summarizeSportDays, activityCosts, prematureMorning,
-  dayKinds, learnRows, fitCosts, recoveryBands,
+  dayKinds, learnRows, fitCosts, recoveryBands, carryForward,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
@@ -156,7 +156,8 @@ export async function runMorning(db: SupabaseClient, userId: string, opts: RunOp
   // the daily pull adds each new morning.
   const hist = cfg.learned?.days ? w : await pullHistory(at).catch(() => w);
   const early = planInputs(cfg);
-  const learnedRows = { ...(cfg.learned?.days ?? {}), ...learnRows(hist, dayKinds(hist, sets, early.zone2)) };
+  const dayKind = dayKinds(hist, sets, early.zone2);
+  const learnedRows = { ...(cfg.learned?.days ?? {}), ...learnRows(hist, dayKind) };
   const sessionCosts = fitCosts(learnedRows, tun, early.activities);
   if (offset !== cfg.utc_offset_minutes || cfg.whoop_summary?.updated !== state.date) {
     const measured = cfg.whoop_summary?.max_heart_rate ? null : await body(at).catch(() => null);
@@ -220,8 +221,16 @@ export async function runMorning(db: SupabaseClient, userId: string, opts: RunOp
       personal.activityCosts[a.sport] = learned;
   }
   const template = weekTemplate(inputs);
+  // A lift that was scheduled and skipped comes forward to today rather than
+  // being lost, and the rest of the week shifts along behind it.
+  const carried = carryForward(template, dayKind, state.date);
+  if (carried) template[state.dow] = carried.slot;
   const z2 = inputs.zone2;
   const decision = decide(state, plan, template, tun, z2, personal);
+  // Say so in the decision itself, not only in the week: the athlete should
+  // read why today is not what the calendar said it would be.
+  if (carried && decision.level !== "red")
+    decision.detail = `${carried.reason} ${decision.detail}`;
   // Readiness is measured, not scheduled: consecutive weeks with at least
   // two runs. Adding a run type before the criteria are met is the fastest
   // way to get hurt, and the calendar cannot tell whether the work happened.
@@ -254,6 +263,7 @@ export async function runMorning(db: SupabaseClient, userId: string, opts: RunOp
     protocols: PROTOCOLS.map(({ id, title, source, confidence, reviewed }) =>
       ({ id, title, source, confidence, reviewed })),
     tunables: tun,
+    carried: carried ? { from: carried.from, kind: carried.kind, dow: state.dow } : null,
     activity_costs: personal.activityCosts,
     session_costs: sessionCosts,
   };
