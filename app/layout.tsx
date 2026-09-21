@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
@@ -33,7 +33,13 @@ export const metadata: Metadata = {
     url: defaultUrl,
   },
   twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION },
+  // The home-screen label, which would otherwise be the whole long title.
+  // Not "capable": a standalone web app on iOS hands cross-origin navigation
+  // back to Safari, which would strand anyone mid-way through WHOOP's OAuth.
+  appleWebApp: { capable: false, title: "Optimizer" },
 };
+
+export const viewport: Viewport = { themeColor: "#09090b" };
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
