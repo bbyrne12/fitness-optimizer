@@ -95,26 +95,43 @@ end $$;
 -- their own row, the demo included. That is the point of this migration.
 
 -- ------------------------------------------------------ the nightly undo
--- Put the plan back from demo_baseline every night. Fill in the two values
--- and run this part separately; the secret is not in the repository.
+-- Put the plan back from demo_baseline every night.
+--
+-- Nothing to fill in: the address and the secret are lifted out of the
+-- morning job 003 already scheduled, so this file stays free of both and the
+-- two jobs cannot drift apart. If that job is not there, this raises and the
+-- rest of the migration still stands -- schedule it by hand afterwards.
 create extension if not exists pg_cron with schema extensions;
 create extension if not exists pg_net  with schema extensions;
 
-select cron.unschedule('demo-reset')
-where exists (select 1 from cron.job where jobname = 'demo-reset');
+do $mig$
+declare
+  morning text;
+  url     text;
+  secret  text;
+begin
+  select command into morning from cron.job where jobname = 'athlete-os-morning';
+  if morning is null then
+    raise exception 'No athlete-os-morning job to copy the address and secret from. Run 003_morning_cron.sql first.';
+  end if;
 
-select cron.schedule(
-  'demo-reset',
-  -- 08:00 UTC, before anyone in the US is awake to read the application.
-  '0 8 * * *',
-  $job$
-    select net.http_get(
-      url     := 'https://REPLACE_WITH_YOUR_APP.vercel.app/api/demo/reset',
-      headers := jsonb_build_object('Authorization', 'Bearer REPLACE_WITH_CRON_SECRET'),
-      timeout_milliseconds := 30000
-    );
-  $job$
-);
+  -- Same deployment, same secret, different path.
+  url    := regexp_replace(substring(morning from 'url\s*:=\s*''([^'']+)'''),
+                           '/api/morning.*$', '/api/demo/reset');
+  secret := substring(morning from 'Bearer ([^'']+)''');
+  if url is null or secret is null then
+    raise exception 'Could not read the address and secret out of the morning job.';
+  end if;
+
+  perform cron.unschedule('demo-reset') from cron.job where jobname = 'demo-reset';
+
+  -- 08:00 UTC, before anyone in the US is awake to open the application.
+  perform cron.schedule('demo-reset', '0 8 * * *', format(
+    'select net.http_get(url := %L, headers := jsonb_build_object(%L, %L), timeout_milliseconds := 30000);',
+    url, 'Authorization', 'Bearer ' || secret));
+
+  raise notice 'demo-reset scheduled against %', url;
+end $mig$;
 
 -- Check it, signed in as the demo athlete:
 --   select public.is_demo();            -- true for them, false for everyone else
