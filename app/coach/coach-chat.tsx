@@ -6,6 +6,7 @@ import { ArrowUp, Check } from "lucide-react";
 import Link from "next/link";
 
 import { coach, type ChatMessage } from "./actions";
+import { RichText } from "./rich-text";
 import { DEMO_SAMPLE, DEMO_SAMPLE_RECORDED, DEMO_STARTERS, type DemoLimit } from "./demo-content";
 
 type Shown = ChatMessage & { applied?: string[]; error?: string };
@@ -102,9 +103,9 @@ export function CoachChat({ firstName, demo = false }: { firstName: string; demo
                     {m.content}
                   </p>
                 ) : (
-                  <p className="max-w-[92%] whitespace-pre-wrap text-[15px] leading-[1.65] text-zinc-100">
-                    {m.content}
-                  </p>
+                  <div className="max-w-[92%] space-y-3 text-[15px] leading-[1.65] text-zinc-100">
+                    <RichText text={m.content} />
+                  </div>
                 )}
                 {m.applied && (
                   <ul className="flex flex-wrap gap-2">
@@ -214,7 +215,7 @@ function DemoLimitPanel({ limit }: { limit: DemoLimit }) {
               </div>
             ) : (
               <div key={i} className="flex flex-col gap-3">
-                <p className="max-w-[92%] whitespace-pre-wrap text-[15px] leading-[1.65] text-zinc-100">{m.content}</p>
+                <div className="max-w-[92%] space-y-3 text-[15px] leading-[1.65] text-zinc-100"><RichText text={m.content} /></div>
                 {m.applied && (
                   <ul className="flex flex-wrap gap-2">
                     {m.applied.map((a) => (
