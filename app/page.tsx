@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, Activity, BarChart3, MessageSquare, NotebookPen } from "lucide-react";
 
 import { EmailSample } from "@/components/email-sample";
+import { Logo } from "@/components/logo";
 
 const FEATURES = [
   {
@@ -70,6 +71,12 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-zinc-950 text-white antialiased">
       <section className="relative flex min-h-screen items-center justify-center overflow-hidden px-6">
+        <header className="absolute inset-x-0 top-0 z-20 mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
+          <Logo markClassName="h-6 w-6" />
+          <Link href="/auth/login" className="text-sm font-medium text-zinc-400 transition-colors hover:text-white">
+            Sign in
+          </Link>
+        </header>
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 [background:radial-gradient(60%_50%_at_50%_30%,rgba(163,230,53,0.08),transparent_70%)]"
@@ -265,9 +272,7 @@ export default function Home() {
 
       <footer className="border-t border-zinc-900 px-6 py-8">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-center text-xs text-zinc-500 sm:flex-row sm:text-left">
-          <span className="font-semibold tracking-tight text-zinc-400">
-            Fitness Optimizer
-          </span>
+          <Logo className="opacity-80" markClassName="h-5 w-5" />
           <span>
             Not affiliated with WHOOP. Training guidance, not medical advice.
           </span>

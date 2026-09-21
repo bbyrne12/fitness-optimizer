@@ -9,6 +9,8 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { Menu } from "lucide-react";
 
+import { Logo } from "@/components/logo";
+
 // The routine builder (/plan, /plans) and the exercise library (/exercises)
 // are deliberately not here. Neither is part of training day to day: one is a
 // way to get a starting routine when there is nothing to log yet, the other a
@@ -75,11 +77,8 @@ export function AppNav() {
             <Menu className="h-5 w-5" />
           </Button>
 
-          <Link
-            href="/protected"
-            className="font-bold tracking-tight text-white hover:opacity-90"
-          >
-            Fitness Optimizer
+          <Link href="/protected" className="hover:opacity-90">
+            <Logo markClassName="h-5 w-5" />
           </Link>
         </div>
 

@@ -16,8 +16,12 @@ export default function OpengraphImage() {
           fontFamily: "sans-serif",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 14, color: "#a3e635", fontSize: 24, letterSpacing: 4 }}>
-          <div style={{ width: 12, height: 12, borderRadius: 6, background: "#a3e635" }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 18, color: "#a3e635", fontSize: 24, letterSpacing: 4 }}>
+          <svg width="58" height="58" viewBox="0 0 24 24" fill="none">
+            <path d="M2.5 17.5 L8 11.5 L12 15 L19 6" stroke="#a3e635" strokeWidth="2.6"
+                  strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="19" cy="6" r="3" fill="#a3e635" />
+          </svg>
           FITNESS OPTIMIZER
         </div>
         <div style={{ display: "flex", flexDirection: "column", marginTop: 28, fontSize: 76, fontWeight: 700, lineHeight: 1.05 }}>
