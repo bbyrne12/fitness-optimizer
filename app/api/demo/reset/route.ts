@@ -1,20 +1,24 @@
 /**
  * GET /api/demo/reset
  *
- * Puts the demo account's plan back the way the seeder left it. A reviewer
- * signing in from a job application can change the plan -- that is most of
- * what there is to try -- so something has to undo it before the next one
- * arrives. pg_cron calls this nightly (db/migrations/005_demo_account.sql).
+ * Rebuilds the demo account for today. pg_cron calls it nightly
+ * (db/migrations/005_demo_account.sql).
  *
- * Only the plan needs restoring: the logged sets, the daily decisions and the
- * WHOOP tokens are already beyond reach of any signed-in session.
+ * Two jobs in one. A reviewer signing in from a job application can change
+ * the plan, so whatever the last one did has to be undone before the next
+ * arrives. And the demo's history is dated back from the day it was built,
+ * so without a rebuild it goes stale: a few days on, the "latest" morning
+ * decision is days old and the last logged session a week gone. Rebuilding
+ * from lib/athlete/demo-seed.ts each night fixes both, the same way the seed
+ * script builds it.
  *
- * The pristine copy lives in demo_baseline, which no user policy can read, so
- * the session allowed to change the plan is not the one holding the original.
+ * Which accounts are demos is read from demo_baseline, which no user policy
+ * can reach, so the session allowed to change the plan cannot change the list.
  */
 import { NextRequest, NextResponse } from "next/server";
 
 import { admin } from "@/lib/athlete/supabase";
+import { writeDemo } from "@/lib/athlete/demo-seed";
 
 export const maxDuration = 30;
 
@@ -27,28 +31,28 @@ export async function GET(req: NextRequest) {
   }
 
   const db = admin();
-  const { data: baselines, error } = await db
-    .from("demo_baseline").select("user_id, config");
+  const { data: demos, error } = await db.from("demo_baseline").select("user_id");
   if (error) {
     console.error("[demo/reset]", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  if (!baselines?.length) {
+  if (!demos?.length) {
     // Not a failure: a deployment without a demo account simply has none.
-    return NextResponse.json({ restored: 0, note: "no demo baseline saved" });
+    return NextResponse.json({ restored: 0, note: "no demo account registered" });
   }
 
-  const restored: string[] = [];
+  const rebuilt: { user_id: string; sets: number; decisions: number }[] = [];
   const failed: { user_id: string; error: string }[] = [];
-  for (const { user_id, config } of baselines) {
-    // The whole config, so a key the last visitor added goes away too, and
-    // so the demo flag is re-asserted even if something dropped it.
-    const { error: e } = await db.from("athlete_profile").upsert(
-      { user_id, config, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
-    if (e) failed.push({ user_id, error: e.message });
-    else restored.push(user_id);
+  for (const { user_id } of demos) {
+    try {
+      const r = await writeDemo(db, user_id);
+      rebuilt.push({ user_id, sets: r.sets, decisions: r.decisions });
+    } catch (e) {
+      failed.push({ user_id, error: e instanceof Error ? e.message : String(e) });
+    }
   }
   if (failed.length) console.error("[demo/reset]", JSON.stringify(failed));
 
-  return NextResponse.json({ restored: restored.length, failed });
+  // `restored` kept as the count, so what the cron job logs reads the same.
+  return NextResponse.json({ restored: rebuilt.length, rebuilt, failed });
 }
