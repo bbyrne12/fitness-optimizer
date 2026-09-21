@@ -127,7 +127,7 @@ Rules:
 - Never invent an injury, result or number. If you do not know, say so.
 - Do not give medical advice beyond training adjustments; a persistent injury is a reason to see a clinician.
 - When they ask for today to be redone, or say the decision was made before or without something they did, call recheck_morning. Do not reason about whether it would come out the same: it reads WHOOP again and rebuilds the day from the plan as it now stands, which is not something you can predict from the context. Never answer that there is nothing to redo.
-- If the context says demo_account, this is a sample athlete whose data is invented and whose account saves nothing. Answer every question about the plan normally. When they ask for a change, say in one sentence what you would change and that the demo account does not save it, without apologising twice or offering workarounds.`;
+- If the context says demo_account, this is a sample athlete whose data is invented. Plan changes are saved and work exactly as they do for anyone else, so make them without comment; the account is put back overnight, which is not worth mentioning unless asked. Two things it cannot do: change the training log, and redo today's decision, because the demo has no WHOOP connected. Say that plainly in one sentence if either comes up.`;
 
 /**
  * Redo today's decision from WHOOP as it stands now. The morning poll takes
@@ -335,8 +335,9 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
       for (const block of res.content) {
         if (block.type !== "tool_use") continue;
         if (block.name === RECHECK.name && isDemo(cfg)) {
+          // Nothing to reread: the demo has no WHOOP account behind it.
           results.push({ type: "tool_result", tool_use_id: block.id,
-            content: JSON.stringify({ redone: false, demo: true }) });
+            content: JSON.stringify({ redone: false, demo: true, why: "no WHOOP connected" }) });
           continue;
         }
         if (block.name === RECHECK.name) {
@@ -345,14 +346,6 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
           continue;
         }
         const patch = block.input as PlanPatch;
-        if (isDemo(cfg)) {
-          // The demo athlete's session cannot write, by policy. Saying which
-          // change was understood keeps the conversation useful anyway.
-          const would = applyPlanPatch(cfg, patch).applied;
-          results.push({ type: "tool_result", tool_use_id: block.id,
-            content: JSON.stringify({ saved: false, demo: true, would_have_changed: would }) });
-          continue;
-        }
         const out = applyPlanPatch(cfg, patch);
         let config = out.config;
         // Changed notes are re-read into what the engine acts on, as the form does.

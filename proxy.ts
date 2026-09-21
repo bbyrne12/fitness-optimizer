@@ -18,12 +18,13 @@ export const config = {
      * - manifest.webmanifest (fetched by the browser with no cookies when
      *   someone adds the site to a home screen, so the redirect below
      *   would hand it a login page instead of the icons)
+     * - api/demo/reset (machine-called; same CRON_SECRET)
      * - api/morning (machine-called; it has no Supabase session, so the
      *   redirect below would hand the poller a login page. It does its own
      *   auth with CRON_SECRET. Only this one route is excluded, not all of
      *   /api, so everything else still requires a signed-in user.)
      * Feel free to modify this pattern to include more paths.
      */
-    "/((?!_next/static|_next/image|favicon.ico|opengraph-image|twitter-image|manifest.webmanifest|api/morning|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|opengraph-image|twitter-image|manifest.webmanifest|api/morning|api/demo/reset|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

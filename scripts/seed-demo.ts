@@ -5,7 +5,8 @@
  *
  *   DEMO_EMAIL=demo@example.com DEMO_PASSWORD='...' npx tsx scripts/seed-demo.ts
  *
- * Idempotent: running it again resets the demo account to the same state.
+ * Idempotent: running it again resets the demo account to the same state, and
+ * saves that state as the baseline /api/demo/reset restores nightly.
  * The demo has no WHOOP tokens, so the morning job never touches it, and its
  * profile asks for no email, so nothing is ever sent from it.
  */
@@ -208,6 +209,13 @@ async function main() {
   const { error: profErr } = await db.from("athlete_profile").upsert(
     { user_id: userId, config, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
   if (profErr) throw new Error(`profile: ${profErr.message}`);
+
+  // The copy /api/demo/reset restores from every night. A reviewer may change
+  // the plan -- that is most of what there is to try -- so the original is
+  // kept in a table no signed-in session can read, demo one included.
+  const { error: baseErr } = await db.from("demo_baseline").upsert(
+    { user_id: userId, config, saved_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (baseErr) throw new Error(`baseline: ${baseErr.message} (run db/migrations/005_demo_account.sql first)`);
 
   // The onboarding row, so the dashboard does not send the demo to /onboarding.
   const { error: pErr } = await db.from("profiles").upsert({

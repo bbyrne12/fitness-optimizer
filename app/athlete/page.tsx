@@ -21,6 +21,11 @@ const NOTICES: Record<string, { ok: boolean; text: string }> = {
     text: "WHOOP is connected. Your history is being read now: refresh in a minute to see what each of your sports costs you. The first morning email goes out once WHOOP scores your next recovery.",
   },
   denied: { ok: false, text: "WHOOP access was not approved, so nothing was connected." },
+  demo: {
+    ok: false,
+    text: "The demo account stays on invented data, so it will not connect a real WHOOP "
+      + "account. Everything else here works: change the plan, or ask the coach to.",
+  },
   state: {
     ok: false,
     text: "That connection attempt expired or came back to a different browser. Start it again.",

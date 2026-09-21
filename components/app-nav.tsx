@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { Menu } from "lucide-react";
 
 import { Logo } from "@/components/logo";
+import { DEMO_NOTICE } from "@/lib/athlete/demo";
 
 // The routine builder (/plan, /plans) and the exercise library (/exercises)
 // are deliberately not here. Neither is part of training day to day: one is a
@@ -33,6 +34,7 @@ export function AppNav() {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
+  const [demo, setDemo] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const activeHref = useMemo(() => {
@@ -44,9 +46,15 @@ export function AppNav() {
   useEffect(() => {
     let cancelled = false;
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data }) => {
       if (cancelled) return;
       setEmail(data.user?.email ?? null);
+      if (!data.user) return;
+      // Whoever is signed in should know at a glance whether the athlete they
+      // are reading is a real one. Only the demo account's own row matches.
+      const { data: prof } = await supabase.from("athlete_profile")
+        .select("config->demo").eq("user_id", data.user.id).maybeSingle();
+      if (!cancelled) setDemo((prof as { demo?: unknown } | null)?.demo === true);
     });
     return () => {
       cancelled = true;
@@ -117,6 +125,14 @@ export function AppNav() {
           </Button>
         </div>
       </div>
+
+      {demo && (
+        <div className="border-t border-lime-400/20 bg-lime-400/5">
+          <p className="mx-auto w-full max-w-6xl px-4 py-2 text-[12px] leading-relaxed text-lime-300/90">
+            {DEMO_NOTICE}
+          </p>
+        </div>
+      )}
 
       {menuOpen && (
         <div className="border-t border-zinc-800 bg-zinc-950 md:hidden">
