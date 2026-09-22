@@ -1455,10 +1455,13 @@ function coreLine(e: LoggedSet & { total: number }): string {
  * and calves and stop being one. If the day has nothing for the muscle it is
  * named after, one movement is swapped in for it.
  */
-const KIND_NEEDS: Record<string, string[]> = {
-  "legs-posterior": ["hamstrings"],
-  "legs-quad": ["quadriceps"],
-  "legs-hip": ["glutes", "adductors", "abductors"],
+const KIND_NEEDS: Record<string, string[][]> = {
+  // Each leg day owes a hinge and a knee-dominant movement, whichever it
+  // leans on: one leg day a week is too few to leave hamstrings for another
+  // week. The emphasis is what rotates, not whether the muscle is trained.
+  "legs-posterior": [["hamstrings"], ["quadriceps"]],
+  "legs-quad": [["quadriceps"], ["hamstrings"]],
+  "legs-hip": [["glutes", "adductors", "abductors"], ["hamstrings"]],
 };
 
 /** Sessions of a kind the first compound holds for before it may rotate. */
@@ -1469,13 +1472,19 @@ const MAIN_LIFT_BLOCK = 6;
 const ROTATE_AFTER = 3;
 /** Most swaps in one session, so it still reads as the session they know. */
 const MAX_SWAPS = 2;
+/** Movements in a session before it stops gaining any, however much is
+ *  missing from it. */
+const MAX_SESSION = 6;
 /** A candidate has to have been done at least this often, so a typo or a
  *  one-off is never prescribed back. */
 const MIN_TIMES_DONE = 2;
 /** And within this long, so a two-year-old movement is not "due". */
 const CANDIDATE_MAX_AGE_DAYS = 540;
 
-export type Swap = { in: string; out: string; last: string | null };
+/** A movement standing in for another, or added when nothing could be given
+ *  up for it (`out` null): every lift in the session was one the athlete
+ *  holds by hand. */
+export type Swap = { in: string; out: string | null; last: string | null };
 
 type Candidate = { name: string; tier: number; muscle: string; last: string; times: number; row: LoggedSet };
 
@@ -1563,8 +1572,8 @@ export function varySession(sets: LoggedSet[], kind: string, base: LoggedSet[], 
   // First, what the day is named after. A posterior day with no hinge in it
   // is a quad day wearing the wrong label, and rotating within it only moves
   // the squats around.
-  const needs = KIND_NEEDS[kind];
-  if (needs && !exercises.some((e) => needs.includes(mainMuscle(e, opts.muscleOf)))) {
+  for (const needs of KIND_NEEDS[kind] ?? []) {
+    if (exercises.some((e) => needs.includes(mainMuscle(e, opts.muscleOf)))) continue;
     const best = [...pool.entries()]
       .filter(([k, c]) => !inSession.has(k) && !held(c.name) && needs.includes(c.muscle))
       // The one they have done most often: this is coverage, not novelty.
@@ -1578,12 +1587,20 @@ export function varySession(sets: LoggedSet[], kind: string, base: LoggedSet[], 
                         dup: muscles.filter((m) => m === muscles[i]).length }))
       .filter((x) => x.i > 0 && !held(x.e.exercise))
       .sort((a, b) => b.dup - a.dup || b.tier - a.tier || b.i - a.i)[0];
-    if (best && spare) {
-      const c = best[1];
+    if (!best) continue;
+    const c = best[1];
+    if (spare) {
       exercises[spare.i] = { ...c.row, sets: Math.max(spare.e.sets, c.row.sets), reps: c.row.reps ?? spare.e.reps };
       inSession.delete(keyOf(spare.e.exercise));
       inSession.add(best[0]);
       swaps.push({ in: c.name, out: spare.e.exercise.trim(), last: c.last });
+    } else if (exercises.length < MAX_SESSION) {
+      // Nothing here can be given up -- every slot is a lift they hold by
+      // hand -- so the day gains a movement rather than losing one it is
+      // being managed around.
+      exercises.push({ ...c.row });
+      inSession.add(best[0]);
+      swaps.push({ in: c.name, out: null, last: c.last });
     }
   }
 
@@ -1678,18 +1695,33 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
 
   const lift = liftOf(planned);
   if (lift) {
-    // Legs rotate through their three variants, "upper" between push and pull,
-    // and full body through all five: whichever was done longest ago.
-    const rotation: Record<string, string[]> = {
-      legs: ["legs-quad", "legs-hip", "legs-posterior"],
-      upper: ["push", "pull"],
-      "full body": ["legs-quad", "push", "legs-posterior", "pull", "legs-hip"],
-      push: ["push"],
-      pull: ["pull"],
+    // What a lift day alternates between, longest ago first. Each entry is a
+    // group of logged kinds that count as the same turn.
+    //
+    // Legs alternate two ways rather than three. Three emphases and one leg
+    // day a week means each muscle waits three weeks between sessions, and
+    // weekly volume per muscle is what growth follows: every set a week adds
+    // is worth about a third of a percent, out to ten sets and beyond. Two
+    // turns, each covering quads and hamstrings (see KIND_NEEDS), trains
+    // everything every week and alternates only which gets the most. Hip and
+    // posterior work share a turn so adductor work is not lost.
+    const rotation: Record<string, string[][]> = {
+      legs: [["legs-quad"], ["legs-posterior", "legs-hip"]],
+      upper: [["push"], ["pull"]],
+      "full body": [["legs-quad"], ["push"], ["legs-posterior"], ["pull"], ["legs-hip"]],
+      push: [["push"]],
+      pull: [["pull"]],
     };
-    const kind = rotation[lift]
-      .map((k) => ({ k, d: lastSessionOf(sets, k).day ?? "0000-00-00" }))
-      .sort((a, b) => a.d.localeCompare(b.d))[0].k;
+    const when = (k: string) => lastSessionOf(sets, k).day ?? "0000-00-00";
+    // The turn that has waited longest, and inside it the kind that has
+    // waited longest: otherwise the freshest member of a turn keeps being
+    // picked and the other one never comes round again. So the hip and
+    // posterior turn alternates between them, and the adductor work that
+    // only appears on hip days is not quietly dropped.
+    const group = rotation[lift]
+      .map((g) => ({ g, d: g.map(when).sort().reverse()[0] }))
+      .sort((a, b) => a.d.localeCompare(b.d))[0].g;
+    const kind = [...group].sort((a, b) => when(a).localeCompare(when(b)))[0];
     const last = lastSessionOf(sets, kind);
     source = last.day;
     // The same shell, but not the same movements forever.

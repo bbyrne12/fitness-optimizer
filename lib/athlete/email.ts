@@ -22,7 +22,7 @@ type Session = {
   blocks?: { title: string | null; note: string | null; items: string[] }[];
   /** Movements standing in for the usual ones today, so the change is not
    *  silent: an athlete should know why their session moved. */
-  swaps?: { in: string; out: string; last: string | null }[];
+  swaps?: { in: string; out: string | null; last: string | null }[];
   add: { name: string; dose: string; why: string } | null;
   hold: boolean;
 };
@@ -64,7 +64,8 @@ export function renderEmail(opts: {
     ? `<div style="font:400 12px ${SANS};color:${MUTED};padding-top:10px;line-height:1.5">` +
       ses.swaps.map((s) => {
         const when = month(s.last);
-        return `${s.in} in place of ${s.out}${when ? `, last done ${when}` : ""}.`;
+        const where = s.out ? `in place of ${s.out}` : "added";
+        return `${s.in} ${where}${when ? `, last done ${when}` : ""}.`;
       }).join(" ") +
       ` Same session, different movement.</div>`
     : "";
