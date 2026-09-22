@@ -431,6 +431,9 @@ export function liftKindByDay(sets: LoggedSet[]): Record<string, string> {
   for (const [d, vol] of Object.entries(byDay)) {
     if (Object.values(vol).reduce((a, b) => a + b, 0) < 2) continue;
     const k = classifyDay(vol);
+    // Core work is not one of the lift days the week rotates through, so a
+    // day of it does not count as the lift having been done.
+    if (k === "core") continue;
     out[d] = k.startsWith("legs") ? "legs" : k;
   }
   return out;
@@ -1114,6 +1117,11 @@ export function classifyDay(vol: Record<string, number>): string {
   const low = LOWER.reduce((a, b) => a + g(b), 0);
   const up = ["chest", "shoulders", "triceps", "back", "biceps", "forearms"]
     .reduce((a, b) => a + g(b), 0);
+  // Abs and nothing else is a core session, not a lift day. Without this it
+  // falls through the push/pull test with nothing on either side and comes
+  // out "pull", which then stands in as the last pull session and gets
+  // prescribed back as one.
+  if (up + low < 2 && g("abdominals") > 0) return "core";
   if (low > up * 1.5) {
     if (g("adductors") + g("abductors") > 3) return "legs-hip";
     if (g("hamstrings") + g("calves") > g("quadriceps")) return "legs-posterior";
@@ -1347,6 +1355,25 @@ const FOCUS_ADDITIONS: Record<string, { fits: string[]; add: [string, string, st
     add: ["Calf raises", "3 x 25", "Calves are one of your focus areas, and they fit on any day."] },
 };
 
+/** How long an addition waits before it is suggested again, having been
+ *  suggested and not done. A nudge every morning is not a nudge. */
+export const ADD_REPEAT_DAYS = 7;
+
+/** Done inside this many days counts as taken up, so the addition retires and
+ *  the exercise carries on in the session it was added to. */
+const ADD_TAKEN_UP_DAYS = 60;
+
+const sameExercise = (a: string, b: string) => {
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\b(\w+?)s\b/g, "$1").replace(/\s+/g, " ").trim();
+  const [x, y] = [norm(a), norm(b)];
+  return Boolean(x && y) && (x === y || x.includes(y) || y.includes(x));
+};
+
+/** Additions that are protocols or whole blocks rather than one exercise to
+ *  take up: these are not retired by doing them once. */
+const STANDING_ADD = /slow breathing|ab circuit|core|mobility|isometric/i;
+
 /** The first focus muscle whose addition belongs in today's session, if any. */
 function focusAddition(focus: string[], planned: string, lift: string | null) {
   for (const m of focus) {
@@ -1450,6 +1477,10 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
                             muscleOf?: (name: string) => string | null | undefined;
                             /** The athlete's local date, for "recent". */
                             today?: string;
+                            /** Additions already suggested in the last
+                             *  ADD_REPEAT_DAYS days, so one is not asked for
+                             *  again every morning. */
+                            recentAdds?: string[];
                           } = {}) {
   const personal = opts.personal ?? personalFrom({});
   const scale = level === "green" ? 1 : opts.scale ?? 0.8;
@@ -1498,8 +1529,13 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
       blocks.push({ title: "Straight sets", items: straight,
                     note: "All sets of one lift before the next. Rest 2–3 min between sets on the compounds." });
     if (circuit.length)
-      blocks.push({ title: "Mini circuit", items: circuit,
-                    note: "One set of each, then round again. About a minute between rounds." });
+      // Only a circuit when it is the small stuff after the main lifts. On
+      // its own it is the session, and the sets beside each movement say how
+      // it is done.
+      blocks.push(straight.length
+        ? { title: "Mini circuit", items: circuit,
+            note: "One set of each, then round again, until each has the sets beside it. About a minute between rounds." }
+        : { title: null, note: null, items: circuit });
     items.push(...straight, ...circuit);
   }
 
@@ -1522,9 +1558,22 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
     items.push("Strides — 6 x 20s fast, full recovery between");
 
   // A profile's own additions win, then a focus muscle that fits today, then the defaults.
-  let add = personal.additions[planned]
+  let add: [string, string, string] | null | undefined = personal.additions[planned]
     ?? focusAddition(personal.focusMuscles, planned, lift)
     ?? ADDITIONS[planned] ?? ADDITIONS[lift ?? ""];
+  if (add && !STANDING_ADD.test(add[0])) {
+    // Taken up already: it belongs in the session now, not in a box at the
+    // bottom. The session is built from the last day of this kind, so once it
+    // has been done on one it comes back on its own. Recently, though: an
+    // exercise last done two years ago is the reason an addition exists.
+    const since = opts.today ? shift(opts.today, -ADD_TAKEN_UP_DAYS) : "0000-00-00";
+    if (sets.some((r) => r.day >= since && sameExercise(r.exercise, add![0]))) add = null;
+    // Already in today's session, from that same history.
+    else if (items.some((i) => sameExercise(i.split("—")[0], add![0]))) add = null;
+    // Suggested in the last few days and not taken up: leave it be rather
+    // than asking again every morning, or reaching for something new.
+    else if ((opts.recentAdds ?? []).length) add = null;
+  }
   // When HRV is the thing that is off, the breathing protocol outranks whatever
   // else was scheduled: after one low morning when HRV is the athlete's goal,
   // after two otherwise.
@@ -1536,7 +1585,9 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   if (level === "red")
     return { items: ["Walk if you want to move."], blocks: [], source_date: null, add: null, hold: true };
 
-  // Whatever is not a lift -- the run, the sport, strides -- is its own block.
+  // Whatever is not a lift -- the run, the sport, strides -- is its own block,
+  // and it comes before the core work below: the run is the session, core is
+  // what finishes the day.
   const rest = items.filter((i) => !blocks.some((b) => b.items.includes(i)));
   if (rest.length) blocks.push({ title: blocks.length ? "Also today" : null, note: null, items: rest });
 
@@ -1549,11 +1600,17 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
       // A bodyweight routine is done straight through, once; machine work
       // goes round three times.
       const routine = core.every((c) => !/@ \d/.test(c));
-      add = ["Core circuit",
+      add = ["Core work",
              routine ? `${core.length} movements, about 10 min` : `${core.length} movements, 3 rounds, about 10 min`,
              add[2] + (own ? " Your own routine, as you last did it." : "")];
-      blocks.push({ title: "Core circuit", items: core,
-                    note: routine ? "Straight through, once. About 10 minutes." : "One set of each, then round again. About a minute between rounds." });
+      // Whether it is one pass or several is the sets beside each movement,
+      // not the word "circuit": saying "straight through, once" next to
+      // "3 x 50" tells the athlete two different things.
+      const rounds = core.some((c) => /\b\d+ x /.test(c));
+      blocks.push({ title: "Core work", items: core,
+                    note: rounds
+                      ? "One at a time, all the sets beside it, then on to the next. About 10 minutes."
+                      : "Straight through, once. About 10 minutes." });
       items.push(...core);
     }
   }

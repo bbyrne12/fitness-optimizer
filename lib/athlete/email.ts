@@ -6,10 +6,13 @@ import nodemailer from "nodemailer";
  *
  * Email clients strip <style> blocks, so this is all inline styles.
  */
-const BG = "#09090b", LINE = "#27272a";
-const FG = "#fafafa", MUTED = "#a1a1aa", DIM = "#71717a";
+// Light, because that is how mail is read: a dark card in a white inbox
+// looks like an advert, and the phone clients light it anyway. The state
+// colours are the darker shades of the same hues, for contrast on white.
+const BG = "#ffffff", CARD = "#fafafa", LINE = "#e4e4e7";
+const FG = "#18181b", MUTED = "#52525b", DIM = "#71717a";
 const STATE: Record<string, string> = {
-  green: "#22c55e", yellow: "#f59e0b", red: "#ef4444",
+  green: "#15803d", yellow: "#b45309", red: "#b91c1c",
 };
 const MONO = "'JetBrains Mono',Menlo,Consolas,monospace";
 const SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
@@ -44,8 +47,8 @@ export function renderEmail(opts: {
       : "") + b.items.map(row).join("")).join("");
 
   const add = ses.add
-    ? `<div style="border:1px solid #3f4d1f;background:#141a0c;padding:12px 14px;margin-top:16px">
-         <div style="font:500 9px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:#a3e635">Add today</div>
+    ? `<div style="border:1px solid #d3e59a;background:#f6fbe9;padding:12px 14px;margin-top:16px">
+         <div style="font:500 9px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:#4d7c0f">Add today</div>
          <div style="font:500 15px ${MONO};color:${FG};padding-top:6px">${ses.add.name} &middot; ${ses.add.dose}</div>
          <div style="font:400 12px ${SANS};color:${MUTED};padding-top:5px">${ses.add.why}</div>
        </div>`
@@ -66,8 +69,8 @@ export function renderEmail(opts: {
     : "";
 
   const deload = dec.deload_advised
-    ? `<div style="border:1px solid #5a3a1a;background:#1d1409;padding:12px 14px;margin-top:16px">
-         <div style="font:500 9px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:#f59e0b">Recovery week advised</div>
+    ? `<div style="border:1px solid #f0d09a;background:#fdf8ef;padding:12px 14px;margin-top:16px">
+         <div style="font:500 9px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:#b45309">Recovery week advised</div>
          <div style="font:400 12px ${SANS};color:${MUTED};padding-top:5px;line-height:1.5">
            HRV has been under its band five mornings or more. Drop volume 20-30% for a
            week, keep intensity low, raise mobility work. This is not losing fitness.
@@ -75,8 +78,9 @@ export function renderEmail(opts: {
        </div>`
     : "";
 
-  return `<div style="background:${BG};padding:24px 14px;font-family:${SANS}">
-<div style="max-width:440px;margin:0 auto">
+  return `<meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light">
+<div style="background:${CARD};padding:24px 14px;font-family:${SANS}">
+<div style="max-width:440px;margin:0 auto;background:${BG};border:1px solid ${LINE};border-radius:10px;padding:22px 20px">
   <div style="font:500 10px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:${DIM};padding-bottom:14px">
     ${date} &middot; ${dow} &middot; <span style="color:${c}">${badge} &middot; ${Math.round(recovery)}%</span>
   </div>

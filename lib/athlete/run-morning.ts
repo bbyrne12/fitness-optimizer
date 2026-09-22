@@ -15,6 +15,7 @@ import {
   imbalances, loadWarnings, intensityDistribution, protocolFlags,
   runConsistencyWeeks, readiness, mesocycle, personalFrom, planInputs,
   whoopSportDays, mergeSportDays, summarizeSportDays, activityCosts, prematureMorning,
+  ADD_REPEAT_DAYS,
   dayKinds, learnRows, fitCosts, recoveryBands, carryForward,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
@@ -49,6 +50,9 @@ function offsetMinutes(offset: unknown): number | null {
   const m = /^([+-])(\d{2}):(\d{2})$/.exec(offset);
   return m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : null;
 }
+
+const shiftDays = (day: string, n: number) =>
+  new Date(Date.parse(`${day}T12:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
 
 const dayAt = (offsetMin: number) =>
   new Date(Date.now() + offsetMin * 60_000).toISOString().slice(0, 10);
@@ -237,6 +241,16 @@ export async function runMorning(db: SupabaseClient, userId: string, opts: RunOp
   const consistency = runConsistencyWeeks(state._workouts as any, state.date,
                                           Math.min(2, Math.max(1, inputs.runDays)));
   const ready = readiness(consistency);
+  // What has already been suggested this week, so an addition not taken up
+  // is left alone rather than asked for again every morning.
+  const { data: addRows } = await retrying(() => db.from("decision_log")
+    .select("decision->session->add->>name")
+    .eq("user_id", userId)
+    .gte("day", shiftDays(state.date, -ADD_REPEAT_DAYS))
+    .lt("day", state.date));
+  const recentAdds = (addRows ?? [])
+    .map((r: any) => r.name as string | null).filter((n): n is string => Boolean(n));
+
   const session = prescribe(sets, decision.planned, decision.level, z2,
                             plan.long_run_this_week_mi,
                             { hrvStreak: state.hrv_low_streak,
@@ -245,7 +259,7 @@ export async function runMorning(db: SupabaseClient, userId: string, opts: RunOp
                               defaultSets: tun.default_sets,
                               scale: decision.scale,
                               muscleOf: (n) => alias(n)?.primary_muscle,
-                              today: state.date });
+                              today: state.date, recentAdds });
   const dist = intensityDistribution(state._workouts as any, state.date);
   // Phase follows weeks actually trained, not weeks elapsed.
   const meso = mesocycle(consistency, inputs.race ? plan.weeks_out : Infinity);
