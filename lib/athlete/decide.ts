@@ -1448,6 +1448,19 @@ function coreLine(e: LoggedSet & { total: number }): string {
  * athlete's own log, which is also where the new exercise's load comes from.
  */
 
+/**
+ * What each leg day is supposed to be about. The three rotate so that a week
+ * with two leg days in it trains different things on each, but the kind is
+ * read back from what was logged, so a "posterior" day can drift into squats
+ * and calves and stop being one. If the day has nothing for the muscle it is
+ * named after, one movement is swapped in for it.
+ */
+const KIND_NEEDS: Record<string, string[]> = {
+  "legs-posterior": ["hamstrings"],
+  "legs-quad": ["quadriceps"],
+  "legs-hip": ["glutes", "adductors", "abductors"],
+};
+
 /** Sessions of a kind the first compound holds for before it may rotate. */
 const MAIN_LIFT_BLOCK = 6;
 /** Sessions an accessory holds for before it may rotate, so the session
@@ -1546,6 +1559,34 @@ export function varySession(sets: LoggedSet[], kind: string, base: LoggedSet[], 
 
   const exercises = [...base];
   const swaps: Swap[] = [];
+
+  // First, what the day is named after. A posterior day with no hinge in it
+  // is a quad day wearing the wrong label, and rotating within it only moves
+  // the squats around.
+  const needs = KIND_NEEDS[kind];
+  if (needs && !exercises.some((e) => needs.includes(mainMuscle(e, opts.muscleOf)))) {
+    const best = [...pool.entries()]
+      .filter(([k, c]) => !inSession.has(k) && !held(c.name) && needs.includes(c.muscle))
+      // The one they have done most often: this is coverage, not novelty.
+      .sort((a, b) => b[1].times - a[1].times || b[1].last.localeCompare(a[1].last))[0];
+    // Taken from the least important slot that is not the first compound,
+    // and from a muscle the session already has more than one of when there
+    // is one, so nothing the day needs is lost to make room.
+    const muscles = exercises.map((e) => mainMuscle(e, opts.muscleOf));
+    const spare = exercises
+      .map((e, i) => ({ e, i, tier: exerciseTier(e.exercise, opts.muscleOf?.(e.exercise)),
+                        dup: muscles.filter((m) => m === muscles[i]).length }))
+      .filter((x) => x.i > 0 && !held(x.e.exercise))
+      .sort((a, b) => b.dup - a.dup || b.tier - a.tier || b.i - a.i)[0];
+    if (best && spare) {
+      const c = best[1];
+      exercises[spare.i] = { ...c.row, sets: Math.max(spare.e.sets, c.row.sets), reps: c.row.reps ?? spare.e.reps };
+      inSession.delete(keyOf(spare.e.exercise));
+      inSession.add(best[0]);
+      swaps.push({ in: c.name, out: spare.e.exercise.trim(), last: c.last });
+    }
+  }
+
   for (let i = 0; i < exercises.length && swaps.length < MAX_SWAPS; i++) {
     const cur = exercises[i];
     const curKey = keyOf(cur.exercise);
@@ -1716,6 +1757,18 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
     ?? focusAddition(personal.focusMuscles, planned, lift)
     ?? ADDITIONS[planned] ?? ADDITIONS[lift ?? ""];
   if (add && !STANDING_ADD.test(add[0])) {
+    // An addition carries a claim about the athlete's history -- "you have
+    // not done one in 21 months" -- and that claim ages, while the addition
+    // itself sits on the profile unchanged. Re-read it from the log each
+    // morning rather than repeating what was true when it was written.
+    const done = sets.filter((r) => sameExercise(r.exercise, add![0])).map((r) => r.day).sort();
+    const lastDone = done.at(-1) ?? null;
+    const kept = add[2].split(/(?<=\.)\s+/)
+      .filter((sentence) => !/not done|last done|haven't done|have not done/i.test(sentence));
+    const when = lastDone
+      ? `Last done ${new Date(lastDone + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })}.`
+      : "Not in your log at all.";
+    add = [add[0], add[1], [...kept, when].join(" ").trim()];
     // Taken up already: it belongs in the session now, not in a box at the
     // bottom. The session is built from the last day of this kind, so once it
     // has been done on one it comes back on its own. Recently, though: an
