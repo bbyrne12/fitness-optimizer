@@ -5,7 +5,7 @@
  * no rendering, no database. Kept deliberately small so the Python version and
  * this one can be read side by side and seen to agree.
  */
-import { musclesFor, bucket, LOWER } from "./muscles";
+import { musclesFor, bucket, canonical, LOWER } from "./muscles";
 import { INTENSITY_TARGET, CADENCE_TARGET } from "./protocols";
 
 export const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -1428,6 +1428,152 @@ function coreLine(e: LoggedSet & { total: number }): string {
 }
 
 /**
+ * Swapping exercises, inside the shape of the session the athlete already
+ * does.
+ *
+ * Prescribing the last session of a kind back verbatim is right about the
+ * shell -- how many movements, in what order, at what loads -- and wrong to
+ * do forever. Rotating between exercises the athlete has actually done
+ * produces the same size and strength as keeping them fixed, and people
+ * enjoy training more when it moves (Baz-Valle 2019; Kassiano 2022), so the
+ * gain here is adherence, not hypertrophy, and it is not worth paying much
+ * for. What it can cost is the main lift: technique and load on one movement
+ * are what progression is measured on, and the usual advice is to hold a
+ * primary lift for a block or two and rotate the accessories around it.
+ *
+ * So: the first compound holds for a block of sessions, everything after it
+ * rotates, never more than two swaps in a session, and only between things
+ * on the same rung of the same session with the same muscle behind them --
+ * a row for a row, never a row for a curl. Candidates come only from the
+ * athlete's own log, which is also where the new exercise's load comes from.
+ */
+
+/** Sessions of a kind the first compound holds for before it may rotate. */
+const MAIN_LIFT_BLOCK = 6;
+/** Sessions an accessory holds for before it may rotate, so the session
+ *  changes now and then rather than every week, and two movements cannot
+ *  trade places back and forth. */
+const ROTATE_AFTER = 3;
+/** Most swaps in one session, so it still reads as the session they know. */
+const MAX_SWAPS = 2;
+/** A candidate has to have been done at least this often, so a typo or a
+ *  one-off is never prescribed back. */
+const MIN_TIMES_DONE = 2;
+/** And within this long, so a two-year-old movement is not "due". */
+const CANDIDATE_MAX_AGE_DAYS = 540;
+
+export type Swap = { in: string; out: string; last: string | null };
+
+type Candidate = { name: string; tier: number; muscle: string; last: string; times: number; row: LoggedSet };
+
+/** The muscle a movement is mostly about, for deciding what may stand in for it. */
+function mainMuscle(r: LoggedSet, muscleOf?: (n: string) => string | null | undefined): string {
+  const m = r.primary_muscle ?? muscleOf?.(r.exercise) ?? musclesFor(r.exercise)[0]?.[0];
+  return m ? bucket(String(m).toLowerCase()) : "";
+}
+
+/** Everything the athlete has done on days of this kind: when it was last
+ *  done, how many sessions it has appeared in, and the heaviest set of the
+ *  last day it was done, which is the load it would be prescribed at. */
+function candidates(sets: LoggedSet[], kind: string, today: string,
+                    muscleOf?: (n: string) => string | null | undefined): Map<string, Candidate> {
+  const byDay = volumeByDay(sets);
+  const days = new Set(Object.keys(byDay).filter(
+    (d) => d <= today && Object.values(byDay[d]).reduce((a, b) => a + b, 0) >= 2 && classifyDay(byDay[d]) === kind));
+  const oldest = shift(today, -CANDIDATE_MAX_AGE_DAYS);
+
+  const seen = new Map<string, Set<string>>();
+  const last = new Map<string, string>();
+  const rows = new Map<string, LoggedSet>();
+  for (const r of sets) {
+    if (!days.has(r.day)) continue;
+    const key = canonical(r.exercise) ?? r.exercise.trim().toLowerCase();
+    if (!seen.has(key)) seen.set(key, new Set());
+    seen.get(key)!.add(r.day);
+    const prev = last.get(key);
+    // The most recent day it was done, and the heaviest set of that day: the
+    // weight to come back at, not the lightest one ever logged.
+    if (!prev || r.day > prev) { last.set(key, r.day); rows.set(key, r); }
+    else if (r.day === prev && (r.weight ?? 0) > (rows.get(key)!.weight ?? 0)) rows.set(key, r);
+  }
+
+  const out = new Map<string, Candidate>();
+  for (const [key, when] of last) {
+    const times = seen.get(key)!.size;
+    if (times < MIN_TIMES_DONE || when < oldest) continue;
+    const row = rows.get(key)!;
+    // Its own set count on that day, not one set of it.
+    const total = [...sets].filter((r) => r.day === when &&
+      (canonical(r.exercise) ?? r.exercise.trim().toLowerCase()) === key)
+      .reduce((n, r) => n + r.sets, 0);
+    out.set(key, { name: row.exercise.trim(), tier: exerciseTier(row.exercise, muscleOf?.(row.exercise)),
+                   muscle: mainMuscle(row, muscleOf), last: when, times, row: { ...row, sets: total } });
+  }
+  return out;
+}
+
+/**
+ * The session to prescribe: the shape of the last one of its kind, with up to
+ * two movements swapped for ones the athlete has not done in a while.
+ */
+export function varySession(sets: LoggedSet[], kind: string, base: LoggedSet[], opts: {
+  today: string;
+  muscleOf?: (name: string) => string | null | undefined;
+  /** Lifts the athlete holds by hand (an injury, a rehab block): left alone. */
+  manualLifts?: string[];
+  /** Off a green morning the session is already cut back; novelty can wait. */
+  vary?: boolean;
+}): { exercises: LoggedSet[]; swaps: Swap[] } {
+  if (!opts.vary || base.length < 2) return { exercises: base, swaps: [] };
+  const pool = candidates(sets, kind, opts.today, opts.muscleOf);
+  if (pool.size <= base.length) return { exercises: base, swaps: [] };
+
+  const keyOf = (n: string) => canonical(n) ?? n.trim().toLowerCase();
+  const held = (n: string) => (opts.manualLifts ?? []).some((h) => keyOf(n).includes(h.toLowerCase()));
+  const inSession = new Set(base.map((e) => keyOf(e.exercise)));
+
+  // How many sessions of this kind in a row a movement has been in, most
+  // recent first: what says whether it has had its run.
+  const byDay = volumeByDay(sets);
+  const kindDays = Object.keys(byDay)
+    .filter((d) => d < opts.today && Object.values(byDay[d]).reduce((a, b) => a + b, 0) >= 2 && classifyDay(byDay[d]) === kind)
+    .sort().reverse();
+  const runOf = (key: string) => {
+    const miss = kindDays.findIndex((d) => !sets.some(
+      (r) => r.day === d && (canonical(r.exercise) ?? r.exercise.trim().toLowerCase()) === key));
+    return miss === -1 ? kindDays.length : miss;
+  };
+
+  const exercises = [...base];
+  const swaps: Swap[] = [];
+  for (let i = 0; i < exercises.length && swaps.length < MAX_SWAPS; i++) {
+    const cur = exercises[i];
+    const curKey = keyOf(cur.exercise);
+    if (held(cur.exercise)) continue;
+    const tier = exerciseTier(cur.exercise, opts.muscleOf?.(cur.exercise));
+    // The first compound is the one progression is measured on: it holds for
+    // a block, where everything after it holds for a few sessions.
+    const anchor = i === 0 && tier <= 0.5;
+    if (runOf(curKey) < (anchor ? MAIN_LIFT_BLOCK : ROTATE_AFTER)) continue;
+    const muscle = mainMuscle(cur, opts.muscleOf);
+    // Same rung, same muscle, not already in today's session, and not done
+    // more recently than what it would replace. Least recently done wins, so
+    // the rotation moves on by itself instead of settling on one favourite.
+    const best = [...pool.entries()]
+      .filter(([k, c]) => k !== curKey && !inSession.has(k) && !held(c.name) &&
+                          c.tier === tier && c.muscle === muscle && c.last < (cur.day ?? opts.today))
+      .sort((a, b) => a[1].last.localeCompare(b[1].last) || a[0].localeCompare(b[0]))[0];
+    if (!best) continue;
+    const c = best[1];
+    exercises[i] = { ...c.row, sets: Math.max(cur.sets, c.row.sets), reps: c.row.reps ?? cur.reps };
+    inSession.delete(curKey);
+    inSession.add(best[0]);
+    swaps.push({ in: c.name, out: cur.exercise.trim(), last: c.last });
+  }
+  return { exercises, swaps };
+}
+
+/**
  * The athlete's own core routine: the most recent day their log shows a real
  * core session (three or more movements), as they did it, or failing that
  * their most recent core work. Filled to three movements with the defaults
@@ -1486,6 +1632,7 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   const scale = level === "green" ? 1 : opts.scale ?? 0.8;
   const items: string[] = [];
   const blocks: SessionBlock[] = [];
+  const swaps: Swap[] = [];
   let source: string | null = null;
 
   const lift = liftOf(planned);
@@ -1502,8 +1649,15 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
     const kind = rotation[lift]
       .map((k) => ({ k, d: lastSessionOf(sets, k).day ?? "0000-00-00" }))
       .sort((a, b) => a.d.localeCompare(b.d))[0].k;
-    const { day, exercises } = lastSessionOf(sets, kind);
-    source = day;
+    const last = lastSessionOf(sets, kind);
+    source = last.day;
+    // The same shell, but not the same movements forever.
+    const { exercises, swaps: made } = varySession(sets, kind, last.exercises, {
+      today: opts.today ?? new Date().toISOString().slice(0, 10),
+      muscleOf: opts.muscleOf, manualLifts: personal.manualLifts,
+      vary: level === "green",
+    });
+    swaps.push(...made);
     // Heaviest first, finishers last; ties keep the order they were logged in.
     const ordered = exercises
       .map((e, i) => ({ e, i, tier: exerciseTier(e.exercise, opts.muscleOf?.(e.exercise)) }))
@@ -1583,7 +1737,7 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
            "way to raise RMSSD: 5-15 ms over 4-6 weeks."];
 
   if (level === "red")
-    return { items: ["Walk if you want to move."], blocks: [], source_date: null, add: null, hold: true };
+    return { items: ["Walk if you want to move."], blocks: [], swaps: [], source_date: null, add: null, hold: true };
 
   // Whatever is not a lift -- the run, the sport, strides -- is its own block,
   // and it comes before the core work below: the run is the session, core is
@@ -1618,6 +1772,7 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   return {
     items,
     blocks,
+    swaps,
     source_date: source,
     add: add ? { name: add[0], dose: add[1], why: add[2] } : null,
     hold: level !== "green",

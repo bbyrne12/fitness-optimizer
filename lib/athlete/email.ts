@@ -20,6 +20,9 @@ const SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-s
 type Session = {
   items: string[];
   blocks?: { title: string | null; note: string | null; items: string[] }[];
+  /** Movements standing in for the usual ones today, so the change is not
+   *  silent: an athlete should know why their session moved. */
+  swaps?: { in: string; out: string; last: string | null }[];
   add: { name: string; dose: string; why: string } | null;
   hold: boolean;
 };
@@ -52,6 +55,18 @@ export function renderEmail(opts: {
          <div style="font:500 15px ${MONO};color:${FG};padding-top:6px">${ses.add.name} &middot; ${ses.add.dose}</div>
          <div style="font:400 12px ${SANS};color:${MUTED};padding-top:5px">${ses.add.why}</div>
        </div>`
+    : "";
+
+  const month = (d: string | null) => d
+    ? new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })
+    : null;
+  const swaps = ses.swaps?.length
+    ? `<div style="font:400 12px ${SANS};color:${MUTED};padding-top:10px;line-height:1.5">` +
+      ses.swaps.map((s) => {
+        const when = month(s.last);
+        return `${s.in} in place of ${s.out}${when ? `, last done ${when}` : ""}.`;
+      }).join(" ") +
+      ` Same session, different movement.</div>`
     : "";
 
   const hold = ses.hold
@@ -88,6 +103,7 @@ export function renderEmail(opts: {
     ${dec.call}
   </div>
   <div style="padding-top:20px">${rows}</div>
+  ${swaps}
   ${hold}
   ${add}
   ${deload}
