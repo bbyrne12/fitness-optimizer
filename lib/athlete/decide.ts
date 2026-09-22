@@ -1568,6 +1568,11 @@ export function varySession(sets: LoggedSet[], kind: string, base: LoggedSet[], 
 
   const exercises = [...base];
   const swaps: Swap[] = [];
+  // The session comes in the order it was logged, not the order it is done,
+  // so the movement to leave alone is the heaviest one in it rather than
+  // whichever was typed first.
+  const tierAt = (i: number) => exerciseTier(exercises[i].exercise, opts.muscleOf?.(exercises[i].exercise));
+  const anchor = exercises.reduce((best, _, i) => tierAt(i) < tierAt(best) ? i : best, 0);
 
   // First, what the day is named after. A posterior day with no hinge in it
   // is a quad day wearing the wrong label, and rotating within it only moves
@@ -1585,7 +1590,7 @@ export function varySession(sets: LoggedSet[], kind: string, base: LoggedSet[], 
     const spare = exercises
       .map((e, i) => ({ e, i, tier: exerciseTier(e.exercise, opts.muscleOf?.(e.exercise)),
                         dup: muscles.filter((m) => m === muscles[i]).length }))
-      .filter((x) => x.i > 0 && !held(x.e.exercise))
+      .filter((x) => x.i !== anchor && !held(x.e.exercise))
       .sort((a, b) => b.dup - a.dup || b.tier - a.tier || b.i - a.i)[0];
     if (!best) continue;
     const c = best[1];
@@ -1609,10 +1614,10 @@ export function varySession(sets: LoggedSet[], kind: string, base: LoggedSet[], 
     const curKey = keyOf(cur.exercise);
     if (held(cur.exercise)) continue;
     const tier = exerciseTier(cur.exercise, opts.muscleOf?.(cur.exercise));
-    // The first compound is the one progression is measured on: it holds for
-    // a block, where everything after it holds for a few sessions.
-    const anchor = i === 0 && tier <= 0.5;
-    if (runOf(curKey) < (anchor ? MAIN_LIFT_BLOCK : ROTATE_AFTER)) continue;
+    // The heaviest lift is the one progression is measured on: it holds for
+    // a block, where everything around it holds for a few sessions.
+    const isAnchor = i === anchor && tier <= 0.5;
+    if (runOf(curKey) < (isAnchor ? MAIN_LIFT_BLOCK : ROTATE_AFTER)) continue;
     const muscle = mainMuscle(cur, opts.muscleOf);
     // Same rung, same muscle, not already in today's session, and not done
     // more recently than what it would replace. Least recently done wins, so
