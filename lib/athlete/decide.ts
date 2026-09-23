@@ -1370,6 +1370,42 @@ const sameExercise = (a: string, b: string) => {
   return Boolean(x && y) && (x === y || x.includes(y) || y.includes(x));
 };
 
+/** Words an addition uses for a muscle, and the bucket volume is counted
+ *  under. */
+const MUSCLE_WORDS: Record<string, string> = {
+  core: "abdominals", abs: "abdominals", abdominals: "abdominals", obliques: "abdominals",
+  calves: "calves", calf: "calves", chest: "chest", back: "back", lats: "back",
+  shoulders: "shoulders", delts: "shoulders", biceps: "biceps", triceps: "triceps",
+  forearms: "forearms", glutes: "glutes", quads: "quadriceps", quadriceps: "quadriceps",
+  hamstrings: "hamstrings", adductors: "adductors", abductors: "abductors",
+};
+
+/**
+ * An addition sits on the profile with facts about the athlete written into
+ * it -- "core is 0.2 sets/wk", "you have not done one in 21 months" -- and
+ * those were true when someone wrote them. Read them back from the log each
+ * morning: rewrite the weekly set counts, and drop a claim there is no
+ * longer any way to stand behind.
+ */
+function refreshedWhy(why: string, sets: LoggedSet[], today: string): string {
+  const per = imbalances(sets, today).per_week;
+  return why.split(/(?<=\.)\s+/)
+    .map((sentence) => {
+      if (/not done|last done|haven't done/i.test(sentence)) return "";
+      if (!/\/\s*wk/.test(sentence)) return sentence;
+      // Matched on whole words, so a name cannot be found inside another.
+      const words = new Set(sentence.toLowerCase().match(/[a-z]+/g) ?? []);
+      const named = Object.keys(MUSCLE_WORDS).filter((w) => words.has(w));
+      // One muscle to a sentence, or there is no telling which number is
+      // whose: better to drop it than to restate it wrongly.
+      const buckets = new Set(named.map((w) => MUSCLE_WORDS[w]));
+      if (buckets.size !== 1) return "";
+      const live = per[[...buckets][0]] ?? 0;
+      return sentence.replace(/\d+(?:\.\d+)?(?=\s*(?:sets?\s*)?\/\s*wk)/g, String(live));
+    })
+    .filter(Boolean).join(" ").trim();
+}
+
 /** Additions that are protocols or whole blocks rather than one exercise to
  *  take up: these are not retired by doing them once. */
 const STANDING_ADD = /slow breathing|ab circuit|core|mobility|isometric/i;
@@ -1798,19 +1834,15 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   let add: [string, string, string] | null | undefined = personal.additions[planned]
     ?? focusAddition(personal.focusMuscles, planned, lift)
     ?? ADDITIONS[planned] ?? ADDITIONS[lift ?? ""];
+  // Whatever the addition says about this athlete, say what is true today.
+  if (add && opts.today) add = [add[0], add[1], refreshedWhy(add[2], sets, opts.today)];
   if (add && !STANDING_ADD.test(add[0])) {
-    // An addition carries a claim about the athlete's history -- "you have
-    // not done one in 21 months" -- and that claim ages, while the addition
-    // itself sits on the profile unchanged. Re-read it from the log each
-    // morning rather than repeating what was true when it was written.
     const done = sets.filter((r) => sameExercise(r.exercise, add![0])).map((r) => r.day).sort();
     const lastDone = done.at(-1) ?? null;
-    const kept = add[2].split(/(?<=\.)\s+/)
-      .filter((sentence) => !/not done|last done|haven't done|have not done/i.test(sentence));
     const when = lastDone
       ? `Last done ${new Date(lastDone + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })}.`
       : "Not in your log at all.";
-    add = [add[0], add[1], [...kept, when].join(" ").trim()];
+    add = [add[0], add[1], `${add[2]} ${when}`.trim()];
     // Taken up already: it belongs in the session now, not in a box at the
     // bottom. The session is built from the last day of this kind, so once it
     // has been done on one it comes back on its own. Recently, though: an
