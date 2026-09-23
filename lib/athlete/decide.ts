@@ -1344,7 +1344,7 @@ const FOCUS_ADDITIONS: Record<string, { fits: string[]; add: [string, string, st
   arms: { fits: ["pull", "push", "upper", "full body"],
     add: ["Curls and pressdowns, superset", "3 x 12 each", "Direct arm work. One of your focus areas."] },
   core: { fits: ["*"],
-    add: ["Ab circuit", "10 min", "Core is one of your focus areas, and it fits on any day."] },
+    add: ["Ab circuit", "10 min", "Core is one of your focus areas. Three days a week, with a day between them."] },
   glutes: { fits: ["legs", "full body"],
     add: ["Hip thrusts", "3 x 12", "Glutes: the biggest muscle in the body and the least trained by machines. One of your focus areas."] },
   quads: { fits: ["legs", "full body"],
@@ -1472,6 +1472,11 @@ const MAIN_LIFT_BLOCK = 6;
 const ROTATE_AFTER = 3;
 /** Most swaps in one session, so it still reads as the session they know. */
 const MAX_SWAPS = 2;
+/** Days a week core work is prescribed. Two to four is the range in the
+ *  literature and three the usual recommendation, with a day in between:
+ *  abdominals recover quickly, but not so quickly that every day is worth
+ *  more than three. */
+const CORE_DAYS_PER_WEEK = 3;
 /** Movements in a session before it stops gaining any, however much is
  *  missing from it. */
 const MAX_SESSION = 6;
@@ -1781,7 +1786,7 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   }
   const activity = personal.activities.find((a) => a.sport === planned);
   if (activity)
-    items.push(`${activity.label}${activity.time ? " — " + clock(activity.time) : ""}. That is the whole session.`);
+    items.push(`${activity.label}${activity.time ? ` at ${clock(activity.time)}` : ""}.`);
 
   // Strides: top-end work that costs almost nothing in recovery, which is how
   // the polarized model gets its hard fraction back without a new session.
@@ -1836,7 +1841,18 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
   if (rest.length) blocks.push({ title: blocks.length ? "Also today" : null, note: null, items: rest });
 
   // "Ab circuit" becomes the athlete's own core exercises, at their loads,
-  // as a block of the session rather than a word in the addition.
+  // as a block of the session rather than a word in the addition -- but not
+  // every day. Core is trained two to four times a week in the literature,
+  // three being the usual recommendation, with a day between sessions; a
+  // daily prescription is past the point where more is worth anything.
+  if (add && /ab circuit|core/i.test(add[0]) && opts.today) {
+    const coreDay = (day: string) => sets.some(
+      (r) => r.day === day && exerciseTier(r.exercise, opts.muscleOf?.(r.exercise)) >= 3);
+    let recent = 0;
+    for (let i = 1; i <= 7; i++) if (coreDay(shift(opts.today, -i))) recent++;
+    // Done yesterday, or three times this week already: leave it.
+    if (recent >= CORE_DAYS_PER_WEEK || coreDay(shift(opts.today, -1))) add = null;
+  }
   if (add && /ab circuit|core/i.test(add[0])) {
     const core = coreCircuit(sets, opts.today ?? new Date().toISOString().slice(0, 10), opts.muscleOf);
     if (core.length) {
@@ -1851,11 +1867,19 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
       // not the word "circuit": saying "straight through, once" next to
       // "3 x 50" tells the athlete two different things.
       const rounds = core.some((c) => /\b\d+ x /.test(c));
-      blocks.push({ title: "Core work", items: core,
-                    note: rounds
-                      ? "One at a time, all the sets beside it, then on to the next. About 10 minutes."
-                      : "Straight through, once. About 10 minutes." });
+      const how = rounds
+        ? "One at a time, all the sets beside it, then on to the next. About 10 minutes."
+        : "Straight through, once. About 10 minutes.";
+      // On a day built around a match or a practice, say where it goes:
+      // trunk work before the session is fatigue taken into it.
+      const when = activity
+        ? ` Do it after ${activity.label.toLowerCase()}, or earlier in the day. Not in the hour before.`
+        : "";
+      blocks.push({ title: "Core work", items: core, note: how + when });
       items.push(...core);
+      // It is a block of the session now, listed movement by movement. Left
+      // in the addition as well it is the same thing said twice.
+      add = null;
     }
   }
 

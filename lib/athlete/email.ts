@@ -42,7 +42,14 @@ export function renderEmail(opts: {
     `<div style="font:400 14px ${MONO};color:${FG};padding:7px 0;border-bottom:1px solid ${LINE}">${i}</div>`;
   // Lifts come grouped: the compounds as straight sets, the small stuff as a
   // circuit. Each group gets a heading saying how to run it.
-  const blocks = ses.blocks?.length ? ses.blocks : [{ title: null, note: null, items: ses.items }];
+  // On a day that is one session -- a match, a practice -- the headline
+  // already says it, and repeating it as the first line of the session is
+  // the same sentence twice.
+  const same = (a: string) => a.trim().toLowerCase().replace(/[.\s]+$/, "")
+    === dec.call.trim().toLowerCase().replace(/[.\s]+$/, "");
+  const blocks = (ses.blocks?.length ? ses.blocks : [{ title: null, note: null, items: ses.items }])
+    .map((b) => ({ ...b, items: b.items.filter((i) => !same(i)) }))
+    .filter((b) => b.items.length);
   const rows = blocks.map((b) =>
     (b.title
       ? `<div style="font:500 9px ${MONO};letter-spacing:.16em;text-transform:uppercase;color:${DIM};padding:14px 0 2px">${b.title}</div>` +

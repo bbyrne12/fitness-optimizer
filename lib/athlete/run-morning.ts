@@ -298,11 +298,21 @@ export async function runMorning(db: SupabaseClient, userId: string, opts: RunOp
     || (await retrying(() => db.auth.admin.getUserById(userId))).data.user?.email;
   if (!to) return { user_id: userId, sent: false, skipped: "no email address" };
 
+  // The training block is the same most mornings, and a line that never
+  // changes stops being read. It goes in when it has just changed: a new
+  // block, or a recovery week starting or ending.
+  const { data: prevRow } = await retrying(() => db.from("decision_log")
+    .select("decision->meso").eq("user_id", userId).lt("day", state.date)
+    .order("day", { ascending: false }).limit(1).maybeSingle());
+  const prev = (prevRow as { meso?: { phase?: string; recovery_week?: boolean } } | null)?.meso;
+  const blockChanged = !prev || prev.phase !== meso.phase
+    || Boolean(prev.recovery_week) !== Boolean(meso.recovery_week);
+
   const html = renderEmail({
     date: state.date, dow: state.dow, recovery: state.recovery,
     decision, session,
     dashboardUrl: cfg.dashboard_url ?? `${opts.origin}/calendar`,
-    phase: { phase: meso.phase, job: meso.job, recovery_week: meso.recovery_week },
+    phase: blockChanged ? { phase: meso.phase, job: meso.job, recovery_week: meso.recovery_week } : undefined,
   });
   const { id } = await sendEmail(
     to, `${decision.call}  (${Math.round(state.recovery)}% recovered)`, html);
