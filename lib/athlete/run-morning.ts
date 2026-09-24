@@ -16,7 +16,7 @@ import {
   runConsistencyWeeks, readiness, mesocycle, personalFrom, planInputs,
   whoopSportDays, mergeSportDays, summarizeSportDays, activityCosts, prematureMorning,
   ADD_REPEAT_DAYS,
-  dayKinds, learnRows, fitCosts, recoveryBands, carryForward,
+  dayKinds, learnRows, fitCosts, recoveryBands, carryForward, overdueLift,
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
@@ -229,12 +229,20 @@ export async function runMorning(db: SupabaseClient, userId: string, opts: RunOp
   // being lost, and the rest of the week shifts along behind it.
   const carried = carryForward(template, dayKind, state.date);
   if (carried) template[state.dow] = carried.slot;
+  // And where nothing was missed outright but the week has drifted -- a pull
+  // day traded for a run, a lift done on the wrong day -- the lift day goes
+  // to whichever lift has waited longest rather than to the one the calendar
+  // happens to name.
+  const overdue = carried ? null : overdueLift(template, dayKind, state.date);
+  if (overdue) template[state.dow] = overdue.slot;
   const z2 = inputs.zone2;
   const decision = decide(state, plan, template, tun, z2, personal);
   // Say so in the decision itself, not only in the week: the athlete should
   // read why today is not what the calendar said it would be.
   if (carried && decision.level !== "red")
     decision.detail = `${carried.reason} ${decision.detail}`;
+  if (overdue && decision.level !== "red")
+    decision.detail = `${overdue.reason} ${decision.detail}`;
   // Readiness is measured, not scheduled: consecutive weeks with at least
   // two runs. Adding a run type before the criteria are met is the fastest
   // way to get hurt, and the calendar cannot tell whether the work happened.
@@ -278,6 +286,7 @@ export async function runMorning(db: SupabaseClient, userId: string, opts: RunOp
       ({ id, title, source, confidence, reviewed })),
     tunables: tun,
     carried: carried ? { from: carried.from, kind: carried.kind, dow: state.dow } : null,
+    overdue: overdue ? { kind: overdue.kind, last: overdue.last, dow: state.dow } : null,
     activity_costs: personal.activityCosts,
     session_costs: sessionCosts,
   };

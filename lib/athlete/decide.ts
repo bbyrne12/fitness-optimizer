@@ -1069,6 +1069,69 @@ export function weekTemplate(
 const dowOf = (day: string) => DOW[(new Date(day + "T12:00:00Z").getUTCDay() + 6) % 7];
 
 /**
+ * Which lift today should actually be: the one that has waited longest.
+ *
+ * The week places lifts on days -- legs furthest from the long run, push
+ * before it so the legs are fresh -- and that placement is right when the
+ * week goes to plan. It goes wrong the moment it does not. A pull day traded
+ * for a run is not a missed day, so nothing carries it forward, but the lift
+ * is still owed; meanwhile Thursday comes round and prescribes push again
+ * three days after the last push. The day of the week is a weaker claim than
+ * how long a muscle group has actually waited.
+ *
+ * So on a lift day the lift is whichever of the week's lifts was trained
+ * longest ago, today's included: when the week has gone to plan that is the
+ * one already scheduled, and nothing changes.
+ */
+export function overdueLift(
+  template: Record<string, Slot>,
+  kinds: Record<string, string[]>,
+  today: string,
+  lookback = 28,
+): { slot: Slot; kind: string; last: string | null; reason: string } | null {
+  const todaySlot = template[dowOf(today)];
+  const todayLift = liftOf(todaySlot?.[0]);
+  if (!todayLift) return null;
+
+  const lifts = [...new Set(Object.values(template)
+    .map((s) => liftOf(s[0])).filter((l): l is string => Boolean(l)))];
+  if (lifts.length < 2) return null;
+
+  const lastDone = (lift: string): string | null => {
+    for (let i = 1; i <= lookback; i++) {
+      const day = shift(today, -i);
+      if ((kinds[day] ?? []).includes(`lift:${lift}`)) return day;
+    }
+    return null;
+  };
+  const last = Object.fromEntries(lifts.map((l) => [l, lastDone(l)]));
+
+  // The one placement worth keeping: legs the day before the long run leaves
+  // nothing to run on.
+  const tomorrow = template[dowOf(shift(today, 1))]?.[0];
+  const candidates = lifts.filter((l) => !(l === "legs" && tomorrow === "long run"));
+  const order = candidates.sort((a, b) =>
+    (last[a] ?? "0000-00-00").localeCompare(last[b] ?? "0000-00-00") || a.localeCompare(b));
+  const pick = order[0];
+  if (!pick || pick === todayLift) return null;
+
+  const days = (d: string | null) => d
+    ? Math.round((Date.parse(today + "T12:00:00Z") - Date.parse(d + "T12:00:00Z")) / 864e5)
+    : null;
+  const waited = days(last[pick]), since = days(last[todayLift]);
+  const withRun = todaySlot[0].endsWith("+run") ? "+run" : "";
+  const reason = `${LIFT_LABEL[todayLift]}${since != null
+    ? ` was ${since === 1 ? "yesterday" : `${since} days ago`}`
+    : " is what the week says"}, and ${pick} has waited ${waited != null ? `${waited} days` : "longer than the plan goes back"}.`;
+  return {
+    slot: [`${pick}${withRun}`, `${LIFT_LABEL[pick]}, the lift that has waited longest.`],
+    kind: pick,
+    last: last[pick],
+    reason,
+  };
+}
+
+/**
  * A lift that was scheduled and did not happen comes forward to the next lift
  * day, instead of the week carrying on and the session being lost. Rest on
  * Saturday when push was due means push today, and legs waits its turn.

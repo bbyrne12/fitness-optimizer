@@ -96,11 +96,15 @@ async function CalendarBody() {
     recentLongMi: decision?.plan?.long_run_uncapped_mi ?? 3,
     consistencyWeeks: decision?.readiness?.weeks ?? 0,
     personal,
-    // What this morning actually decided, when a skipped lift was moved into it.
-    carried: decision?.carried && decision?.decision?.planned
-      ? { dow: decision.carried.dow,
-          slot: [decision.decision.planned, decision.decision.detail] as [string, string] }
-      : null,
+    // What this morning actually decided, when the lift day moved: a skipped
+    // lift carried into it, or the lift that had waited longest taking it.
+    carried: (() => {
+      const moved = decision?.carried ?? decision?.overdue;
+      return moved && decision?.decision?.planned
+        ? { dow: moved.dow,
+            slot: [decision.decision.planned, decision.decision.detail] as [string, string] }
+        : null;
+    })(),
   });
   const activityFor = (kind: string) => inputs.activities.find((a) => a.sport === kind);
 
