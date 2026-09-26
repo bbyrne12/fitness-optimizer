@@ -267,7 +267,8 @@ export async function runMorning(db: SupabaseClient, userId: string, opts: RunOp
                               defaultSets: tun.default_sets,
                               scale: decision.scale,
                               muscleOf: (n) => alias(n)?.primary_muscle,
-                              today: state.date, recentAdds });
+                              today: state.date, recentAdds,
+                              longRunMi: decision.long_run_mi });
   const dist = intensityDistribution(state._workouts as any, state.date);
   // Phase follows weeks actually trained, not weeks elapsed.
   const meso = mesocycle(consistency, inputs.race ? plan.weeks_out : Infinity);

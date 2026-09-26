@@ -1794,6 +1794,9 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
                              *  ADD_REPEAT_DAYS days, so one is not asked for
                              *  again every morning. */
                             recentAdds?: string[];
+                            /** Today's long run, as decided: the headline and
+                             *  the session have to agree. */
+                            longRunMi?: number | null;
                           } = {}) {
   const personal = opts.personal ?? personalFrom({});
   const scale = level === "green" ? 1 : opts.scale ?? 0.8;
@@ -1880,7 +1883,8 @@ export function prescribe(sets: LoggedSet[], planned: string, level: string,
     items.push(`Easy run — ${Math.round(base * scale)} min, under ${z2} bpm`);
   }
   if (planned === "long run") {
-    const mi = Math.round(longMi * scale * 10) / 10;
+    // Decided once, in decide(), where the weekly-mileage cap is applied.
+    const mi = opts.longRunMi ?? Math.round(longMi * scale * 10) / 10;
     items.push(`Long run — ${mi} mi, under ${z2} bpm`);
   }
   const activity = personal.activities.find((a) => a.sport === planned);
@@ -2143,6 +2147,7 @@ export function decide(state: ReturnType<typeof buildState>,
     reasons.push(`Resting HR is ${rhrUp.toFixed(0)} bpm over baseline — mild system stress.`);
   }
 
+  let longRunMi: number | null = null;
   const tw = state.run_minutes_this_week, lw = state.run_minutes_last_week;
   const overCap = lw > 0 && tw >= lw * (1 + tun.max_weekly_mileage_growth);
   if (overCap)
@@ -2194,6 +2199,10 @@ export function decide(state: ReturnType<typeof buildState>,
   } else if (planned === "long run") {
     let mi = Math.round(longMi * scale * 10) / 10;
     if (overCap) mi = Math.round(mi * 0.85 * 10) / 10;
+    // The one number for today's long run. The session is written from this
+    // rather than working it out again, or the headline and the session
+    // disagree about how far to run.
+    longRunMi = mi;
     call = `Long run — ${mi} miles, easy.`;
     detail = `Stay under ${z2} bpm the whole way. ` + (plan.has_race
       ? `Week ${plan.weeks_out} out; this is the session the race is built on.`
@@ -2237,5 +2246,6 @@ export function decide(state: ReturnType<typeof buildState>,
   }
 
   return { level, call, detail, planned, why_today: why, reasons,
-           zone2_ceiling: z2, deload_advised: deload, scale, bands };
+           zone2_ceiling: z2, deload_advised: deload, scale, bands,
+           long_run_mi: longRunMi };
 }
