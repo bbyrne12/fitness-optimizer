@@ -114,6 +114,8 @@ How the plan works, so you can explain it:
 - Week: activities are placed on their days first; the long run on Sat or Sun with a rest day after; lifts fill the remaining days by split (1 full body, 2 legs/upper, 3 legs/pull/push, 4 adds legs, 5 adds upper); runs stack onto pull or upper days when there is no free day.
 - Each morning: green and red are this athlete's own lines, not WHOOP's 67 and 34. They are learned from the athlete's own spread of mornings and then moved by how much a day started low costs them; their current lines are in the context as recovery_lines. Between the lines the session scales with the number itself, so a 62% day keeps more of the plan than a 45% one. Sleep debt, an HRV streak below their band, and resting heart rate over baseline can push the day down. Below the lower line is rest.
 - The morning decision is made from the first recovery WHOOP scores, which lands shortly after they wake. A short night that they might still be in is held back until it looks whole, and sent by early afternoon at the latest. If they say the email came before they had finished sleeping, or that its sleep and recovery are wrong, use recheck_morning to redo the day from WHOOP as it stands now, and offer to set an earliest time with morning_not_before so it cannot happen again.
+- Where the morning email goes: to the address in email_to when they have set one, otherwise to the account they sign in with. There is always an address. Never tell them nothing can be sent because none is on file, and never let it stop you redoing a day they have asked you to redo.
+- If they say the morning email has not arrived, redo the day with recheck_morning rather than explaining why it might not have. A day already decided is re-sent; a day held back for a broken night is decided and sent. Either way they get their morning.
 - Learned costs: next-morning recovery points each kind of day costs this athlete against a rest day, with that night's sleep held equal, fit on their whole WHOOP history. Blended toward a default until there are at least five measured days. Runs are bucketed by the athlete's own heart-rate zones (zone 2, long, hard), never by duration. Alcohol, illness and stress are not in the data, so a number is an estimate, and the athlete should not over-read small differences.
 - Reading those numbers: they are negative, and the more negative one is the bigger cost. -8.1 costs more than -7.4. Rank by size before calling anything the most or least expensive, and check what you say against the number you quote. A weekly total is the cost times the days it is done, which can outrank a dearer session done once.
 - Loads come from the athlete's own log: the last session of that kind, with a bump once the same load has been done cleanly enough times, except lifts held at current weight.
@@ -312,7 +314,11 @@ export async function coach(history: ChatMessage[], message: string): Promise<Co
         activities: inputs.activities, zone2_ceiling_bpm: inputs.zone2, longest_run_mi: inputs.longestRunMi,
         focus_muscles: cfg.focus_muscles ?? [], notes: cfg.notes ?? null,
         manual_lifts: cfg.manual_lifts ?? [], cues: cfg.cues ?? {},
-        email_daily: cfg.email_daily !== false, email_to: cfg.email_to ?? null,
+        email_daily: cfg.email_daily !== false,
+        // In words, because a bare null reads as "no address on file" to a
+        // model that cannot see the fallback in the code.
+        email_to: cfg.email_to
+          ?? "not set, so the morning goes to the account's own address",
         morning_not_before: cfg.morning_not_before ?? null,
       },
       recovery_lines: dec.decision?.bands
