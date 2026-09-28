@@ -326,9 +326,12 @@ export function prematureMorning(w: Rec, nowMs = Date.now(), notBefore?: number 
   // never past one in the afternoon, and at least an hour whatever the usual.
   const cutoff = Math.min(Math.max(usualWake + 240, usualWake + 60), 13 * 60);
   const short = slept < 0.85 * usualHours;
-  // Waking an hour or more later than usual and still short means the night
-  // is over and it was a bad one. Waiting cannot add to it.
-  const couldStillBeAsleep = woke <= usualWake + 60;
+  // Waking at or about the usual time on a short night is the case this
+  // exists for: WHOOP scores the first wake, and the night may yet go on.
+  // Waking later than usual and still short is a late night that ran its
+  // course -- they are already up, and holding only delays their morning.
+  // A quarter of an hour of slack, because a wake time is not a schedule.
+  const couldStillBeAsleep = woke <= usualWake + 15;
   // Anything recorded today: they are up, so there is nothing to wait for.
   const upAndAbout = (w.workouts ?? []).some(
     (x: Rec) => localDay(x.start, x.timezone_offset) === today);
