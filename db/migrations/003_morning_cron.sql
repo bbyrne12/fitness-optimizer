@@ -18,10 +18,17 @@ where exists (select 1 from cron.job where jobname = 'athlete-os-morning');
 
 select cron.schedule(
   'athlete-os-morning',
-  -- Every 20 minutes, 09:00-16:59 UTC. Set the hours to cover the athlete's
+  -- Every 20 minutes, 09:00-18:59 UTC. Set the hours to cover the athlete's
   -- mornings in their own time zone. Waking time varies by hours and recovery
   -- scores shortly after, so the window has to be wide and the interval short.
-  '*/20 9-16 * * *',
+  --
+  -- It has to outlast the hold as well as the wake. A broken night is held
+  -- until four hours past the usual wake, capped at one in the afternoon
+  -- local time, and the decision is only sent by a poll -- so if the window
+  -- closes before that deadline, the email is not late, it never comes. One
+  -- in the afternoon is 17:00 UTC on US eastern summer time and 18:00 on
+  -- winter time, which is what the last hour here is for.
+  '*/20 9-18 * * *',
   $job$
     select net.http_get(
       url     := 'https://REPLACE_WITH_YOUR_APP.vercel.app/api/morning',
