@@ -20,6 +20,7 @@ import {
   DEFAULT_TUNABLES, type LoggedSet, type Tunables,
 } from "@/lib/athlete/decide";
 import { PROTOCOLS } from "@/lib/athlete/protocols";
+import { isSessionTitle } from "@/lib/athlete/parse-log";
 
 export type RunOpts = { dry: boolean; force: boolean; origin: string };
 
@@ -130,7 +131,10 @@ export async function runMorning(db: SupabaseClient, userId: string, opts: RunOp
     ...fromNotes.filter(
       (r) => !appKeys.has(`${r.day}|${r.exercise.trim().toLowerCase()}`)),
     ...fromApp,
-  ];
+    // The title of a session is not a movement in it. Logs written before the
+    // parser knew that still carry their "Ab workout" rows, and prescribing
+    // one back makes a five-movement routine six.
+  ].filter((r) => !isSessionTitle(r.exercise));
 
   const at = await accessToken(userId);
   const w = await pull(at);

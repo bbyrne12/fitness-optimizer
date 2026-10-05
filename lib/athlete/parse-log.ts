@@ -24,6 +24,22 @@
  */
 export const DEFAULT_SETS = 3;
 
+/**
+ * A line that names the session rather than a movement in it: "Ab workout"
+ * above the five movements of the routine, "Leg day" above the lifts.
+ *
+ * The parser no longer stores these, but logs already written are full of
+ * them, so the engine skips them too: they are not volume, they are not a
+ * lift to prescribe back, and they are not one of the five movements of a
+ * core routine that is then called six.
+ */
+export const isSessionTitle = (name: string): boolean => {
+  const n = name.trim().toLowerCase();
+  return /^(abs?|core)\s*(workout|work|routine|circuit|session|day)?$/.test(n)
+    || /^(push|pull|legs?|upper|lower|full body|arms?|chest|back|shoulders?)\s+(day|workout|session)$/.test(n)
+    || /^(workout|session|lift|lifting|warm ?up|cool ?down)$/.test(n);
+};
+
 export type ParsedSet = {
   day: string;
   exercise: string;
@@ -83,10 +99,19 @@ export function parseLog(text: string, fallbackYear?: number,
   let mult = 1;
   // Inside an "Ab workout" block a bare number is reps of a bodyweight move.
   let inAb = false;
+  // Where the current block's header sits in `out`, until a movement under it
+  // makes the header redundant and it is dropped.
+  let abHeaderAt = -1;
+  const closeAb = () => {
+    // A movement was listed under the header, so the header was a title.
+    if (abHeaderAt >= 0 && out.length > abHeaderAt + 1) out.splice(abHeaderAt, 1);
+    abHeaderAt = -1;
+    inAb = false;
+  };
 
   for (const raw of text.split(/\r?\n/)) {
     const s = raw.trim();
-    if (!s) { mult = 1; inAb = false; continue; }
+    if (!s) { mult = 1; closeAb(); continue; }
 
     const ym = YEAR_RE.exec(s);
     if (ym) { year = 2000 + parseInt(ym[1]); years.add(year); continue; }
@@ -102,7 +127,7 @@ export function parseLog(text: string, fallbackYear?: number,
       const d = new Date(Date.UTC(yr, mo - 1, dy));
       day = d.getUTCMonth() === mo - 1 ? d.toISOString().slice(0, 10) : null;
       if (day) { years.add(yr); sawDate = true; }
-      mult = 1; inAb = false;
+      mult = 1; closeAb();
       continue;
     }
 
@@ -128,6 +153,12 @@ export function parseLog(text: string, fallbackYear?: number,
     // header alone, which still records that the routine was done.
     if (AB_HEADER_RE.test(s)) {
       const dur = /\((\d+)\s*min/i.exec(s);
+      // The header names the routine; it is not one of its movements. It is
+      // kept only until a movement appears under it, so an entry that is the
+      // header alone still records that the routine was done, and one with
+      // its movements listed does not also prescribe "Ab workout" back as an
+      // exercise of its own.
+      abHeaderAt = out.length;
       out.push({ day, exercise: "Ab workout", weight: null, reps: null, sets: 1,
                  pin: dur ? `${dur[1]} min` : null, notes: null });
       inAb = true;
@@ -203,6 +234,8 @@ export function parseLog(text: string, fallbackYear?: number,
       });
     }
   }
+  // The log can end inside the block.
+  closeAb();
 
   return {
     sets: out,
